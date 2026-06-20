@@ -1,0 +1,50 @@
+project: bkw-tariff-proxy
+owner: Patrick / Rootkeeper
+storage: /mnt/synology-rootkeeper/projects/bkw-tariff-proxy
+created_at: "2026-06-20T21:34:00+02:00"
+status: tested-local-http-mvp
+secrets: none
+git:
+  branch: main
+  initial_commit: f4ef434
+source:
+  bkw_swagger: https://api.bkw.ch/api/dyntariffs/swagger/v1/swagger.json
+  energy_return_endpoint: https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn
+observed_api_state_2026_06_20:
+  swagger: "200 application/json;charset=utf-8"
+  endpoints:
+    - url: https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn
+      status: 404
+      body_bytes: 0
+    - url: https://api.bkw.ch/api/dyntariffs/v1/Tariffs
+      status: 404
+      body_bytes: 0
+artifacts:
+  readme: README.md
+  runbook: RUNBOOK.md
+  bkw_api_observations: docs/bkw-api-observations.md
+  loxone_mapping: docs/loxone-endpoints.md
+  tests:
+    - tests/test_normalizer.py
+    - tests/test_service.py
+    - tests/test_app.py
+  source: src/bkw_tariff_proxy/
+  dockerfile: Dockerfile
+  docker_compose_example: examples/docker-compose.yml
+verification:
+  - command: . /home/rootkeeper/.venvs/bkw-tariff-proxy/bin/activate && pytest -q
+    status: ok
+    result: 13 tests passed, 1 upstream TestClient warning
+  - command: python -m py_compile src/bkw_tariff_proxy/*.py
+    status: ok
+    result: all source files compiled
+  - command: uvicorn local smoke test + curl endpoints
+    status: ok
+    result: health/status endpoints reachable; BKW 404 maps to no_data; missing current value returns 503
+  - command: docker compose up -d --build
+    status: blocked
+    result: Docker/Podman/Buildah/Nerdctl not installed on Rootkeeper Pi; verify on intended Docker host later
+notes:
+  - NAS mount does not support Python venv symlinks; development venv is /home/rootkeeper/.venvs/bkw-tariff-proxy.
+  - No GitHub account is required for local development.
+  - Later public distribution should use a Git host and multi-arch container registry.
