@@ -79,7 +79,20 @@ def relative(offset: int) -> str:
     return f"{value:.6f}"
 
 
+def value_to_mchf_kwh(value: float | None) -> int | None:
+    """Convert CHF/kWh float values to milli-CHF/kWh integers for Loxone.
+
+    Loxone command recognition may mark JSON decimal values but parse only the
+    integer part when the payload uses a dot as decimal separator. Integer
+    milli-CHF/kWh values avoid locale/decimal separator ambiguity.
+    """
+    if value is None:
+        return None
+    return int(round(value * 1000))
+
+
 def loxone_template_payload() -> dict:
+    current_value = service.relative_value(0)
     payload = {
         "service": "bkw-tariff-proxy",
         "status": service.effective_status(),
@@ -87,12 +100,16 @@ def loxone_template_payload() -> dict:
         "updated_at": service.state.updated_at,
         "unit": service.state.normalized.get("unit", "CHF/kWh"),
         "horizon_hours": service.state.normalized.get("horizon_hours", 0),
-        "feedin_current": service.relative_value(0),
-        "template_hint": "Loxone virtual HTTP input command recognitions can parse these flat keys.",
+        "feedin_current": current_value,
+        "feedin_current_mchf_kwh": value_to_mchf_kwh(current_value),
+        "loxone_integer_scale": "milli-CHF/kWh; divide by 1000 for CHF/kWh display",
+        "template_hint": "Loxone command recognitions should use *_mchf_kwh integer keys to avoid decimal separator parsing issues.",
         "loxone_relative_endpoints": [f"/v1/feedin/relative/{i}" for i in range(24)],
     }
     for offset in range(24):
-        payload[f"feedin_relative_{offset:02d}"] = service.relative_value(offset)
+        value = service.relative_value(offset)
+        payload[f"feedin_relative_{offset:02d}"] = value
+        payload[f"feedin_relative_{offset:02d}_mchf_kwh"] = value_to_mchf_kwh(value)
     return payload
 
 

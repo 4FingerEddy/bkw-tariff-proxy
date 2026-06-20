@@ -28,6 +28,8 @@ Volume: bkw-tariff-proxy-test_bkw-tariff-proxy-data-v2 -> /data
 Mode after 2026-06-20 update: synthetic Loxone test data with flat root JSON
 Image ID after flat-template update: sha256:5a9f87b62b93...
 Container ID after flat-template update: f60be7afef00...
+Image ID after Loxone integer-field update: sha256:b99cc9496c74...
+Container ID after Loxone integer-field update: f073f08cd494...
 ```
 
 ## Build method used
@@ -54,12 +56,12 @@ GET http://192.168.5.40:8785/v1/feedin/current-and-status -> 503 {"detail":"no v
 GET http://192.168.5.40:8785/v1/feedin/relative/0 -> 503 {"detail":"no valid feed-in value for offset 0"}
 ```
 
-Synthetic Loxone test verification after `BKW_TEST_DATA_MODE=synthetic` and flat-template update:
+Synthetic Loxone test verification after `BKW_TEST_DATA_MODE=synthetic` and flat-template/integer-field update:
 
 ```text
 GET http://192.168.5.40:8785/health -> 200 ok
-GET http://192.168.5.40:8785/ -> 200 status ok, status_code 0, feedin_current 0.045, feedin_relative_00 0.045, feedin_relative_23 0.053, horizon_hours 24
-GET http://192.168.5.40:8785/v1/loxone.json -> 200 same flat Loxone payload
+GET http://192.168.5.40:8785/ -> 200 status ok, status_code 0, feedin_current 0.045, feedin_current_mchf_kwh 45, feedin_relative_00_mchf_kwh 45, feedin_relative_23_mchf_kwh 53, horizon_hours 24
+GET http://192.168.5.40:8785/v1/loxone.json -> 200 same flat Loxone payload with decimal and integer fields
 GET http://192.168.5.40:8785/v1/status -> 200 ok
 GET http://192.168.5.40:8785/v1/status-code -> 200 0
 GET http://192.168.5.40:8785/v1/feedin/relative/0 -> 200 0.045000

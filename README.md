@@ -130,8 +130,12 @@ Flat root fields for command recognitions:
 ```text
 status_code
 feedin_current
+feedin_current_mchf_kwh
 feedin_relative_00 ... feedin_relative_23
+feedin_relative_00_mchf_kwh ... feedin_relative_23_mchf_kwh
 ```
+
+For Loxone command recognitions, prefer the `*_mchf_kwh` integer fields. They are scaled as milli-CHF/kWh, so `45` means `0.045 CHF/kWh`. This avoids decimal separator parsing issues in Loxone where a JSON value such as `0.045` may be highlighted correctly but evaluated as `0`.
 
 These values are deliberately fake and are only for validating Loxone virtual HTTP inputs, freshness, parsing, template export, and EMS gating. Disable the variable or set it to `off` before switching to real BKW data.
 

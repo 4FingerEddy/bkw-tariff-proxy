@@ -101,7 +101,12 @@ def test_index_exposes_flat_loxone_template_fields():
     assert response.status_code == 200
     assert payload["status_code"] == 0
     assert payload["feedin_current"] == 0.081
+    assert payload["feedin_current_mchf_kwh"] == 81
     assert payload["feedin_relative_00"] == 0.081
+    assert payload["feedin_relative_00_mchf_kwh"] == 81
     assert payload["feedin_relative_01"] == 0.077
+    assert payload["feedin_relative_01_mchf_kwh"] == 77
     assert payload["feedin_relative_23"] is None
-    assert payload["template_hint"] == "Loxone virtual HTTP input command recognitions can parse these flat keys."
+    assert payload["feedin_relative_23_mchf_kwh"] is None
+    assert payload["loxone_integer_scale"] == "milli-CHF/kWh; divide by 1000 for CHF/kWh display"
+    assert payload["template_hint"] == "Loxone command recognitions should use *_mchf_kwh integer keys to avoid decimal separator parsing issues."

@@ -52,7 +52,7 @@ BKW_TEST_DATA_MODE: synthetic
 Expected endpoints:
 
 ```text
-/ -> flat Loxone template JSON with status_code, feedin_current, feedin_relative_00...23
+/ -> flat Loxone template JSON with status_code, feedin_current, feedin_current_mchf_kwh, feedin_relative_00...23 and feedin_relative_00_mchf_kwh...feedin_relative_23_mchf_kwh
 /v1/loxone.json -> same flat Loxone template JSON
 /v1/status -> ok
 /v1/status-code -> 0
@@ -65,9 +65,11 @@ For a Loxone Library/template export, use one parent virtual HTTP input `BKW Dyn
 
 ```text
 status-code -> \i"status_code":\i\v
-+0          -> \i"feedin_relative_00":\i\v
-+1          -> \i"feedin_relative_01":\i\v
++0          -> \i"feedin_relative_00_mchf_kwh":\i\v
++1          -> \i"feedin_relative_01_mchf_kwh":\i\v
 ```
+
+Use the `*_mchf_kwh` integer fields for Loxone values. `45` means `0.045 CHF/kWh`; apply correction/factor `0.001` only if a display value in CHF/kWh is required. For optimizer ordering, the integer scale can be used directly.
 
 Important: these are fake values. Use them only to test Loxone HTTP inputs and EMS/status gating. Before production/live BKW operation, remove the variable or set:
 
