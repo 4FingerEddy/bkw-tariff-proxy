@@ -10,7 +10,7 @@ This service polls BKW once, caches the result locally, and exposes simple LAN H
 
 ## Current status
 
-Initial Docker/FastAPI MVP skeleton with tests and live API handling.
+Docker/FastAPI MVP is deployed on Synology/Portainer and currently runs in synthetic Loxone test mode.
 
 Observed BKW state on 2026-06-20:
 
@@ -47,7 +47,7 @@ python -m py_compile src/bkw_tariff_proxy/*.py
 Current verification:
 
 ```text
-13 passed, 1 warning
+14 passed, 1 warning
 ```
 
 The remaining warning is from FastAPI/Starlette TestClient internals, not from application code.
@@ -99,11 +99,31 @@ Container: bkw-tariff-proxy-test
 URL from Hausnetz: http://192.168.5.40:8785
 Image: bkw-tariff-proxy:local
 Health: healthy
+Mode: synthetic Loxone test data
+Status: ok / status-code 0
 ```
 
 See `docs/portainer-test-deployment.md` for the exact evidence and the volume-permission pitfall fixed during testing.
 
 The container image runs as non-root `appuser`, exposes port `8785`, persists `/data`, and has a `/health` healthcheck.
+
+## Synthetic Loxone test mode
+
+While BKW live endpoints still return `404`, the Portainer test stack can run with rolling synthetic values:
+
+```yaml
+BKW_TEST_DATA_MODE: synthetic
+```
+
+Effects:
+
+```text
+/v1/status -> ok
+/v1/status-code -> 0
+/v1/feedin/relative/0...23 -> 24 plain numeric CHF/kWh test values
+```
+
+These values are deliberately fake and are only for validating Loxone virtual HTTP inputs, freshness, parsing, and EMS gating. Disable the variable or set it to `off` before switching to real BKW data.
 
 ## Endpoint shape
 

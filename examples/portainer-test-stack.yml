@@ -12,6 +12,7 @@ services:
       POLL_INTERVAL_SECONDS: "900"
       CACHE_MAX_AGE_SECONDS: "5400"
       REQUIRE_FULL_HORIZON: "true"
+      BKW_TEST_DATA_MODE: synthetic
     volumes:
       - bkw-tariff-proxy-data-v2:/data
 

@@ -20,3 +20,4 @@ class Settings:
         "yes",
         "on",
     }
+    test_data_mode: str = os.getenv("BKW_TEST_DATA_MODE", "off").strip().lower()

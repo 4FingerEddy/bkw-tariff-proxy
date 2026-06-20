@@ -2,7 +2,8 @@ project: bkw-tariff-proxy
 owner: Patrick / Rootkeeper
 storage: /mnt/synology-rootkeeper/projects/bkw-tariff-proxy
 created_at: "2026-06-20T21:34:00+02:00"
-status: deployed-portainer-test-healthy
+updated_at: "2026-06-20T22:18:11+02:00"
+status: deployed-portainer-synthetic-loxone-test
 secrets: none-in-project
 git:
   branch: main
@@ -28,14 +29,17 @@ portainer_test_deployment_2026_06_20:
   stack_name: bkw-tariff-proxy-test
   stack_id: 22
   container_name: bkw-tariff-proxy-test
-  container_id_prefix: f1d159b32d60
+  container_id_prefix: c370af87058f
   image: bkw-tariff-proxy:local
-  image_id_prefix: sha256:4a9bcdb05be1
+  image_id_prefix: sha256:a0a08ff9206e
   container_user: appuser
   health: healthy
   restart_policy: unless-stopped
   url: http://192.168.5.40:8785
   volume: bkw-tariff-proxy-test_bkw-tariff-proxy-data-v2
+  mode: synthetic-loxone-test
+  environment:
+    BKW_TEST_DATA_MODE: synthetic
   old_test_volume_removed: bkw-tariff-proxy-test_bkw-tariff-proxy-data
 artifacts:
   readme: README.md
@@ -52,23 +56,31 @@ artifacts:
   docker_compose_example: examples/docker-compose.yml
   portainer_stack_example: examples/portainer-test-stack.yml
 verification:
+  - command: /home/rootkeeper/.hermes/scripts/rootkeeper_model_preflight.py
+    status: ok
+    result: Main provider openai-codex, main model gpt-5.5
   - command: . /home/rootkeeper/.venvs/bkw-tariff-proxy/bin/activate && pytest -q
     status: ok
-    result: 13 tests passed, 1 upstream TestClient warning
+    result: 14 tests passed, 1 upstream TestClient warning
   - command: python -m py_compile src/bkw_tariff_proxy/*.py
     status: ok
     result: all source files compiled
+  - command: local uvicorn smoke with BKW_TEST_DATA_MODE=synthetic
+    status: ok
+    result: health ok; status ok; status-code 0; relative/0 0.045000; horizon 24
   - command: Portainer Docker API build image bkw-tariff-proxy:local
     status: ok
-    result: image built sha256:4a9bcdb05be1...
-  - command: Portainer stack deploy bkw-tariff-proxy-test
+    result: image built sha256:a0a08ff9206e...
+  - command: Portainer stack update bkw-tariff-proxy-test with BKW_TEST_DATA_MODE=synthetic
     status: ok
     result: container healthy, non-root appuser
   - command: curl http://192.168.5.40:8785/health and /v1 endpoints from Pi
     status: ok
-    result: health ok; status no_data; status-code 1; missing feed-in values return 503
+    result: health ok; status ok; status-code 0; relative/0 0.045000; horizon 24
 notes:
   - NAS mount does not support Python venv symlinks; development venv is /home/rootkeeper/.venvs/bkw-tariff-proxy.
   - Current Synology deployment is a test stack using local image tag, not yet a public registry image.
+  - Synthetic values are fake and only for Loxone wiring/EMS gating tests while BKW returns 404.
+  - Before live BKW production operation, set BKW_TEST_DATA_MODE=off or remove the environment variable.
   - No GitHub account is required for local development.
   - Later public distribution should use a Git host and multi-arch container registry.

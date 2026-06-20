@@ -41,6 +41,30 @@ curl -i http://127.0.0.1:8785/v1/feedin/relative.json
 curl -i http://127.0.0.1:8785/v1/feedin/current-and-status
 ```
 
+## Synthetic Loxone test mode
+
+For full Loxone wiring tests while BKW returns `404`, enable synthetic rolling data in the stack environment:
+
+```yaml
+BKW_TEST_DATA_MODE: synthetic
+```
+
+Expected endpoints:
+
+```text
+/v1/status -> ok
+/v1/status-code -> 0
+/v1/feedin/relative/0 -> plain numeric test value, e.g. 0.045000
+/v1/feedin/current-and-status -> 0;0.045000
+/v1/feedin/relative.json -> status ok, horizon_hours 24
+```
+
+Important: these are fake values. Use them only to test Loxone HTTP inputs and EMS/status gating. Before production/live BKW operation, remove the variable or set:
+
+```yaml
+BKW_TEST_DATA_MODE: off
+```
+
 ## Docker / Portainer target
 
 Docker is not installed on the Rootkeeper Pi. Use Portainer on Synology:

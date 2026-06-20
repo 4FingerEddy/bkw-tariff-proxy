@@ -3,8 +3,23 @@
 Base URL example:
 
 ```text
-http://<docker-host>:8785
+http://192.168.5.40:8785
 ```
+
+Current Synology test stack mode:
+
+```text
+synthetic test data
+```
+
+Expected while this mode is enabled:
+
+```text
+status-code -> 0
++0...+23 -> numeric fake CHF/kWh values
+```
+
+These values are for wiring tests only, not real BKW remuneration.
 
 Spotpreis-Optimierer mode:
 

@@ -76,3 +76,24 @@ def test_relative_value_returns_none_for_missing_offset(tmp_path):
 
     assert service.relative_value(0) is None
     assert service.relative_value(1) == 0.077
+
+
+def test_synthetic_test_mode_returns_full_loxone_horizon_without_http(tmp_path, monkeypatch):
+    class FailingClient:
+        def __init__(self, **kwargs):
+            raise AssertionError("synthetic test mode must not call BKW HTTP endpoint")
+
+    monkeypatch.setattr("bkw_tariff_proxy.service.httpx.AsyncClient", FailingClient)
+    service = TariffService(make_settings(tmp_path, test_data_mode="synthetic", require_full_horizon=True))
+
+    state = asyncio.run(service.refresh_once())
+
+    assert state.status == "ok"
+    assert state.last_http_status is None
+    assert state.last_error is None
+    assert state.normalized["horizon_hours"] == 24
+    assert [slot["offset"] for slot in state.normalized["relative"]] == list(range(24))
+    assert service.status_code() == 0
+    assert service.relative_value(0) is not None
+    cache = json.loads(Path(tmp_path, "cache.json").read_text())
+    assert cache["status"] == "ok"

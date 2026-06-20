@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +31,32 @@ class TariffState:
     last_http_status: int | None = None
 
 
+def build_synthetic_bkw_payload(now: datetime, *, horizon_hours: int = 24) -> dict[str, Any]:
+    """Build deterministic rolling test data that looks like BKW TariffDto.
+
+    This is for Loxone integration tests while the public BKW endpoint returns
+    404. Values are plausible, but explicitly fake.
+    """
+
+    base = now.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    prices: list[dict[str, Any]] = []
+    for offset in range(horizon_hours):
+        start = base + timedelta(hours=offset)
+        end = start + timedelta(hours=1)
+        value = round(0.045 + ((offset * 7) % 17) / 1000, 6)
+        prices.append(
+            {
+                "start_timestamp": start.isoformat(),
+                "end_timestamp": end.isoformat(),
+                "feed_in": [{"unit": "CHF/kWh", "value": value}],
+            }
+        )
+    return {
+        "publication_timestamp": now.astimezone(timezone.utc).isoformat(),
+        "prices": prices,
+    }
+
+
 class TariffService:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -55,6 +81,22 @@ class TariffService:
 
     async def refresh_once(self) -> TariffState:
         try:
+            if self.settings.test_data_mode == "synthetic":
+                now = datetime.now(timezone.utc)
+                normalized = normalize_bkw_payload(build_synthetic_bkw_payload(now), now=now)
+                status = normalized["status"]
+                if status == "ok" and self.settings.require_full_horizon and normalized.get("horizon_hours", 0) < 24:
+                    status = "partial_horizon"
+                self.state = TariffState(
+                    status=status,
+                    normalized=normalized,
+                    updated_at=now.isoformat(),
+                    last_error=None,
+                    last_http_status=None,
+                )
+                self._save_cache()
+                return self.state
+
             async with httpx.AsyncClient(timeout=20) as client:
                 response = await client.get(self.settings.bkw_endpoint)
             self.state.last_http_status = response.status_code
