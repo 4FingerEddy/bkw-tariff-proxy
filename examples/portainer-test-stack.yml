@@ -1,0 +1,19 @@
+services:
+  bkw-tariff-proxy:
+    image: bkw-tariff-proxy:local
+    container_name: bkw-tariff-proxy-test
+    restart: unless-stopped
+    ports:
+      - "8785:8785"
+    environment:
+      TZ: Europe/Zurich
+      DATA_DIR: /data
+      BKW_ENDPOINT: https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn
+      POLL_INTERVAL_SECONDS: "900"
+      CACHE_MAX_AGE_SECONDS: "5400"
+      REQUIRE_FULL_HORIZON: "true"
+    volumes:
+      - bkw-tariff-proxy-data-v2:/data
+
+volumes:
+  bkw-tariff-proxy-data-v2:

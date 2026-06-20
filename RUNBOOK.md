@@ -41,16 +41,42 @@ curl -i http://127.0.0.1:8785/v1/feedin/relative.json
 curl -i http://127.0.0.1:8785/v1/feedin/current-and-status
 ```
 
-## Docker target
+## Docker / Portainer target
 
-Build and run with the included Dockerfile and compose example on a Docker-capable host:
+Docker is not installed on the Rootkeeper Pi. Use Portainer on Synology:
+
+```text
+Portainer: https://192.168.5.40:9443
+Endpoint: local / id=2
+Stack: bkw-tariff-proxy-test
+Container: bkw-tariff-proxy-test
+URL: http://192.168.5.40:8785
+```
+
+The current test stack file is:
+
+```text
+examples/portainer-test-stack.yml
+```
+
+The image was built through Portainer's Docker API proxy and is currently tagged on Synology as:
+
+```text
+bkw-tariff-proxy:local
+```
+
+For a manual Docker-capable host, the generic compose example remains:
 
 ```bash
 cd /mnt/synology-rootkeeper/projects/bkw-tariff-proxy/examples
 docker compose up -d --build
 ```
 
-Note: Docker is not installed on the Rootkeeper Pi as of 2026-06-20. Do not install Docker on the Pi as a side effect of this project without a separate infrastructure decision. Docker verification belongs on Synology/Portainer or another intended Docker host.
+See full deployment notes:
+
+```text
+docs/portainer-test-deployment.md
+```
 
 ## BKW live API observation
 

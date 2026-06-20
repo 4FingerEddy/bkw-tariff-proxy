@@ -88,7 +88,20 @@ cd /mnt/synology-rootkeeper/projects/bkw-tariff-proxy/examples
 docker compose up -d --build
 ```
 
-Docker is not installed on the Rootkeeper Pi, so image build verification must be done later on the intended Docker host, likely Synology/Portainer or another Docker machine.
+Docker is not installed on the Rootkeeper Pi, but the image has been built and run on Synology Docker through Portainer.
+
+Current Portainer test deployment:
+
+```text
+Stack: bkw-tariff-proxy-test
+Portainer stack ID: 22
+Container: bkw-tariff-proxy-test
+URL from Hausnetz: http://192.168.5.40:8785
+Image: bkw-tariff-proxy:local
+Health: healthy
+```
+
+See `docs/portainer-test-deployment.md` for the exact evidence and the volume-permission pitfall fixed during testing.
 
 The container image runs as non-root `appuser`, exposes port `8785`, persists `/data`, and has a `/health` healthcheck.
 
