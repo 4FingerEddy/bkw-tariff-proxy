@@ -95,6 +95,18 @@ The current test stack file is:
 examples/portainer-test-stack.yml
 ```
 
+Prepared but intentionally not deployed production template:
+
+```text
+examples/portainer-production-stack.template.yml
+```
+
+Go-live and naming checklist:
+
+```text
+docs/go-live-and-naming-plan.md
+```
+
 The image was built through Portainer's Docker API proxy and is currently tagged on Synology as:
 
 ```text
@@ -123,6 +135,8 @@ docs/bkw-api-observations.md
 ```
 
 Current live state: BKW Swagger is reachable; tariff endpoints return 404 with empty body. The service maps that to `no_data` and keeps Loxone endpoints available.
+
+The existing `bkw-dyntariffs-mqtt-bridge` Zeitauftrag checks the BKW live API every 15 minutes and acts as the current go-live sentinel. Do not add another BKW API watchdog unless that job is paused or retired.
 
 ## Safety notes
 

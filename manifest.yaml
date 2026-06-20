@@ -2,8 +2,8 @@ project: bkw-tariff-proxy
 owner: Patrick / Rootkeeper
 storage: /mnt/synology-rootkeeper/projects/bkw-tariff-proxy
 created_at: "2026-06-20T21:34:00+02:00"
-updated_at: "2026-06-20T22:46:10+02:00"
-status: deployed-portainer-synthetic-loxone-integer-template
+updated_at: "2026-06-20T23:07:20+02:00"
+status: deployed-portainer-synthetic-loxone-integer-template-production-prepared
 secrets: none-in-project
 git:
   branch: main
@@ -46,6 +46,7 @@ artifacts:
   runbook: RUNBOOK.md
   bkw_api_observations: docs/bkw-api-observations.md
   portainer_test_deployment: docs/portainer-test-deployment.md
+  go_live_and_naming_plan: docs/go-live-and-naming-plan.md
   loxone_mapping: docs/loxone-endpoints.md
   tests:
     - tests/test_normalizer.py
@@ -55,6 +56,7 @@ artifacts:
   dockerfile: Dockerfile
   docker_compose_example: examples/docker-compose.yml
   portainer_stack_example: examples/portainer-test-stack.yml
+  portainer_production_stack_template: examples/portainer-production-stack.template.yml
 verification:
   - command: /home/rootkeeper/.hermes/scripts/rootkeeper_model_preflight.py
     status: ok
@@ -82,5 +84,7 @@ notes:
   - Current Synology deployment is a test stack using local image tag, not yet a public registry image.
   - Synthetic values are fake and only for Loxone wiring/EMS gating tests while BKW returns 404.
   - Before live BKW production operation, set BKW_TEST_DATA_MODE=off or remove the environment variable.
+  - Loxone Library/template export is intentionally deferred until real BKW data is available and the final name is agreed.
+  - The existing bkw-dyntariffs-mqtt-bridge Zeitauftrag currently acts as BKW API go-live sentinel; avoid duplicate watchdogs.
   - No GitHub account is required for local development.
   - Later public distribution should use a Git host and multi-arch container registry.

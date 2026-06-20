@@ -1,0 +1,29 @@
+# Production stack template for the BKW tariff HTTP proxy.
+#
+# Do not deploy blindly. Before production use:
+# 1. agree on the final product/container name,
+# 2. verify BKW live API returns real tariff data,
+# 3. keep BKW_TEST_DATA_MODE off/absent,
+# 4. bind the port to the intended Synology LAN IP only.
+
+services:
+  bkw-tariff-proxy:
+    image: bkw-tariff-proxy:local
+    container_name: bkw-tariff-proxy
+    restart: unless-stopped
+    ports:
+      - "192.168.5.40:8785:8785"
+    environment:
+      TZ: Europe/Zurich
+      DATA_DIR: /data
+      BKW_ENDPOINT: https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn
+      POLL_INTERVAL_SECONDS: "900"
+      CACHE_MAX_AGE_SECONDS: "5400"
+      REQUIRE_FULL_HORIZON: "true"
+      # Production must not use synthetic test data.
+      BKW_TEST_DATA_MODE: "off"
+    volumes:
+      - bkw-tariff-proxy-data:/data
+
+volumes:
+  bkw-tariff-proxy-data:

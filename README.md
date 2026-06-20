@@ -107,6 +107,18 @@ See `docs/portainer-test-deployment.md` for the exact evidence and the volume-pe
 
 The container image runs as non-root `appuser`, exposes port `8785`, persists `/data`, and has a `/health` healthcheck.
 
+Production is intentionally not deployed yet. The prepared template is:
+
+```text
+examples/portainer-production-stack.template.yml
+```
+
+Before production use, agree the final product/container/template name, verify real BKW live tariff data, and keep the synthetic test stack separate. See:
+
+```text
+docs/go-live-and-naming-plan.md
+```
+
 ## Synthetic Loxone test mode
 
 While BKW live endpoints still return `404`, the Portainer test stack can run with rolling synthetic values:
@@ -138,6 +150,8 @@ feedin_relative_00_mchf_kwh ... feedin_relative_23_mchf_kwh
 For Loxone command recognitions, prefer the `*_mchf_kwh` integer fields. They are scaled as milli-CHF/kWh, so `45` means `0.045 CHF/kWh`. This avoids decimal separator parsing issues in Loxone where a JSON value such as `0.045` may be highlighted correctly but evaluated as `0`.
 
 These values are deliberately fake and are only for validating Loxone virtual HTTP inputs, freshness, parsing, template export, and EMS gating. Disable the variable or set it to `off` before switching to real BKW data.
+
+The final Loxone Library/template export is intentionally deferred until real BKW data is available and the final name is agreed.
 
 ## Endpoint shape
 
