@@ -27,12 +27,43 @@ Spotpreis-Optimierer mode:
 Relativ
 ```
 
-## Required status input
+## Recommended Loxone template structure
 
-Create a virtual HTTP input for service status:
+For a reusable Loxone Library/template export, use one parent virtual HTTP input:
 
 ```text
-status-code -> /v1/status-code
+Name: BKW Dyntariffs
+URL:  http://192.168.5.40:8785
+```
+
+Under this parent, create the command recognitions as nested virtual inputs. The root JSON is intentionally flat, so each input can use one unique key.
+
+Command recognition examples:
+
+```text
+Status code:      \i"status_code":\i\v
+Current feed-in:  \i"feedin_current":\i\v
++0:               \i"feedin_relative_00":\i\v
++1:               \i"feedin_relative_01":\i\v
++2:               \i"feedin_relative_02":\i\v
+...
++23:              \i"feedin_relative_23":\i\v
+```
+
+Alternative explicit JSON endpoint, if the root page should ever become more human-oriented:
+
+```text
+http://192.168.5.40:8785/v1/loxone.json
+```
+
+It returns the same flat Loxone template payload as `/`.
+
+## Required status input
+
+Create a nested command recognition for service status:
+
+```text
+status-code -> \i"status_code":\i\v
 ```
 
 Mapping:
@@ -58,33 +89,33 @@ Do not treat missing data as `0`. `0` would look like a very attractive feed-in 
 
 ## Relative feed-in inputs
 
-Virtual HTTP inputs:
+Virtual HTTP command recognitions under `BKW Dyntariffs`:
 
 ```text
-+0  -> /v1/feedin/relative/0
-+1  -> /v1/feedin/relative/1
-+2  -> /v1/feedin/relative/2
-+3  -> /v1/feedin/relative/3
-+4  -> /v1/feedin/relative/4
-+5  -> /v1/feedin/relative/5
-+6  -> /v1/feedin/relative/6
-+7  -> /v1/feedin/relative/7
-+8  -> /v1/feedin/relative/8
-+9  -> /v1/feedin/relative/9
-+10 -> /v1/feedin/relative/10
-+11 -> /v1/feedin/relative/11
-+12 -> /v1/feedin/relative/12
-+13 -> /v1/feedin/relative/13
-+14 -> /v1/feedin/relative/14
-+15 -> /v1/feedin/relative/15
-+16 -> /v1/feedin/relative/16
-+17 -> /v1/feedin/relative/17
-+18 -> /v1/feedin/relative/18
-+19 -> /v1/feedin/relative/19
-+20 -> /v1/feedin/relative/20
-+21 -> /v1/feedin/relative/21
-+22 -> /v1/feedin/relative/22
-+23 -> /v1/feedin/relative/23
++0  -> \i"feedin_relative_00":\i\v
++1  -> \i"feedin_relative_01":\i\v
++2  -> \i"feedin_relative_02":\i\v
++3  -> \i"feedin_relative_03":\i\v
++4  -> \i"feedin_relative_04":\i\v
++5  -> \i"feedin_relative_05":\i\v
++6  -> \i"feedin_relative_06":\i\v
++7  -> \i"feedin_relative_07":\i\v
++8  -> \i"feedin_relative_08":\i\v
++9  -> \i"feedin_relative_09":\i\v
++10 -> \i"feedin_relative_10":\i\v
++11 -> \i"feedin_relative_11":\i\v
++12 -> \i"feedin_relative_12":\i\v
++13 -> \i"feedin_relative_13":\i\v
++14 -> \i"feedin_relative_14":\i\v
++15 -> \i"feedin_relative_15":\i\v
++16 -> \i"feedin_relative_16":\i\v
++17 -> \i"feedin_relative_17":\i\v
++18 -> \i"feedin_relative_18":\i\v
++19 -> \i"feedin_relative_19":\i\v
++20 -> \i"feedin_relative_20":\i\v
++21 -> \i"feedin_relative_21":\i\v
++22 -> \i"feedin_relative_22":\i\v
++23 -> \i"feedin_relative_23":\i\v
 ```
 
 Poll interval recommendation:

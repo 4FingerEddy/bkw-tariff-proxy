@@ -79,12 +79,28 @@ def relative(offset: int) -> str:
     return f"{value:.6f}"
 
 
-@app.get("/")
-def index() -> dict:
-    return {
+def loxone_template_payload() -> dict:
+    payload = {
         "service": "bkw-tariff-proxy",
-        "status": service.state.status,
+        "status": service.effective_status(),
         "status_code": service.status_code(),
         "updated_at": service.state.updated_at,
+        "unit": service.state.normalized.get("unit", "CHF/kWh"),
+        "horizon_hours": service.state.normalized.get("horizon_hours", 0),
+        "feedin_current": service.relative_value(0),
+        "template_hint": "Loxone virtual HTTP input command recognitions can parse these flat keys.",
         "loxone_relative_endpoints": [f"/v1/feedin/relative/{i}" for i in range(24)],
     }
+    for offset in range(24):
+        payload[f"feedin_relative_{offset:02d}"] = service.relative_value(offset)
+    return payload
+
+
+@app.get("/v1/loxone.json")
+def loxone_json() -> dict:
+    return loxone_template_payload()
+
+
+@app.get("/")
+def index() -> dict:
+    return loxone_template_payload()

@@ -47,7 +47,7 @@ python -m py_compile src/bkw_tariff_proxy/*.py
 Current verification:
 
 ```text
-14 passed, 1 warning
+15 passed, 1 warning
 ```
 
 The remaining warning is from FastAPI/Starlette TestClient internals, not from application code.
@@ -118,16 +118,28 @@ BKW_TEST_DATA_MODE: synthetic
 Effects:
 
 ```text
+/ -> flat Loxone template JSON
+/v1/loxone.json -> same flat Loxone template JSON
 /v1/status -> ok
 /v1/status-code -> 0
 /v1/feedin/relative/0...23 -> 24 plain numeric CHF/kWh test values
 ```
 
-These values are deliberately fake and are only for validating Loxone virtual HTTP inputs, freshness, parsing, and EMS gating. Disable the variable or set it to `off` before switching to real BKW data.
+Flat root fields for command recognitions:
+
+```text
+status_code
+feedin_current
+feedin_relative_00 ... feedin_relative_23
+```
+
+These values are deliberately fake and are only for validating Loxone virtual HTTP inputs, freshness, parsing, template export, and EMS gating. Disable the variable or set it to `off` before switching to real BKW data.
 
 ## Endpoint shape
 
 - `GET /health` → `ok`
+- `GET /` → flat Loxone template JSON for parent virtual HTTP input command recognitions
+- `GET /v1/loxone.json` → same flat Loxone template JSON as `/`
 - `GET /v1/status` → `ok`, `no_data`, `stale`, `api_error`, `partial_horizon`, `unit_unknown`
 - `GET /v1/status-code` → numeric status for Loxone
 - `GET /v1/feedin/current` → plain numeric CHF/kWh, or 503 when unavailable

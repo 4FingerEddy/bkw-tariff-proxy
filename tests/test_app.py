@@ -75,3 +75,33 @@ def test_current_and_status_endpoint_is_loxone_friendly():
 
     assert response.status_code == 200
     assert response.text == "0;0.081000"
+
+
+def test_index_exposes_flat_loxone_template_fields():
+    set_state(
+        TariffState(
+            status="ok",
+            normalized={
+                "unit": "CHF/kWh",
+                "horizon_hours": 2,
+                "relative": [
+                    {"offset": 0, "value": 0.081},
+                    {"offset": 1, "value": 0.077},
+                ],
+            },
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            last_error=None,
+            last_http_status=200,
+        )
+    )
+
+    response = client.get("/")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["status_code"] == 0
+    assert payload["feedin_current"] == 0.081
+    assert payload["feedin_relative_00"] == 0.081
+    assert payload["feedin_relative_01"] == 0.077
+    assert payload["feedin_relative_23"] is None
+    assert payload["template_hint"] == "Loxone virtual HTTP input command recognitions can parse these flat keys."

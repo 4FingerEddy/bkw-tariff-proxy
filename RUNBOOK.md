@@ -52,11 +52,21 @@ BKW_TEST_DATA_MODE: synthetic
 Expected endpoints:
 
 ```text
+/ -> flat Loxone template JSON with status_code, feedin_current, feedin_relative_00...23
+/v1/loxone.json -> same flat Loxone template JSON
 /v1/status -> ok
 /v1/status-code -> 0
 /v1/feedin/relative/0 -> plain numeric test value, e.g. 0.045000
 /v1/feedin/current-and-status -> 0;0.045000
 /v1/feedin/relative.json -> status ok, horizon_hours 24
+```
+
+For a Loxone Library/template export, use one parent virtual HTTP input `BKW Dyntariffs` on the root URL and add nested command recognitions, e.g.:
+
+```text
+status-code -> \i"status_code":\i\v
++0          -> \i"feedin_relative_00":\i\v
++1          -> \i"feedin_relative_01":\i\v
 ```
 
 Important: these are fake values. Use them only to test Loxone HTTP inputs and EMS/status gating. Before production/live BKW operation, remove the variable or set:
