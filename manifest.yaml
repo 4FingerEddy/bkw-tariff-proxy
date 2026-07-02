@@ -2,8 +2,8 @@ project: bkw-tariff-proxy
 owner: Patrick / Rootkeeper
 storage: /mnt/synology-rootkeeper/projects/bkw-tariff-proxy
 created_at: "2026-06-20T21:34:00+02:00"
-updated_at: "2026-06-20T23:07:20+02:00"
-status: deployed-portainer-synthetic-loxone-integer-template-production-prepared
+updated_at: "2026-07-02T17:48:18+02:00"
+status: deployed-portainer-live-bkw-api-partial-horizon-pre-midnight
 secrets: none-in-project
 git:
   branch: main
@@ -19,7 +19,16 @@ observed_api_state_2026_06_20:
     - url: https://api.bkw.ch/api/dyntariffs/v1/Tariffs
       status: 404
       body_bytes: 0
-portainer_test_deployment_2026_06_20:
+observed_api_state_2026_07_02:
+  endpoint: https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn
+  status: 200
+  publication_timestamp: "2026-07-02T15:45:00Z"
+  interval_count: 96
+  cadence: quarter-hour
+  unit: CHF_kWh
+  first_start_local: "2026-07-03T00:00:00+02:00"
+  last_end_local: "2026-07-04T00:00:00+02:00"
+portainer_deployment:
   portainer_url: https://192.168.5.40:9443
   portainer_version: 2.39.3
   endpoint_id: 2
@@ -29,18 +38,20 @@ portainer_test_deployment_2026_06_20:
   stack_name: bkw-tariff-proxy-test
   stack_id: 22
   container_name: bkw-tariff-proxy-test
-  container_id_prefix: f073f08cd494
+  container_id_prefix: "6839e812d3a7"
   image: bkw-tariff-proxy:local
-  image_id_prefix: sha256:b99cc9496c74
+  image_id_prefix: sha256:e3884b24d972
   container_user: appuser
   health: healthy
   restart_policy: unless-stopped
   url: http://192.168.5.40:8785
-  volume: bkw-tariff-proxy-test_bkw-tariff-proxy-data-v2
-  mode: synthetic-loxone-test
+  volume: bkw-tariff-proxy-data-v2
+  mode: live-bkw-api
   environment:
-    BKW_TEST_DATA_MODE: synthetic
-  old_test_volume_removed: bkw-tariff-proxy-test_bkw-tariff-proxy-data
+    BKW_TEST_DATA_MODE: "off"
+    REQUIRE_FULL_HORIZON: "true"
+    POLL_INTERVAL_SECONDS: "900"
+  latest_cutover_audit: /mnt/synology-rootkeeper/reports/bkw-tariff-proxy/live-cutover/20260702_174315
 artifacts:
   readme: README.md
   runbook: RUNBOOK.md
@@ -57,34 +68,30 @@ artifacts:
   docker_compose_example: examples/docker-compose.yml
   portainer_stack_example: examples/portainer-test-stack.yml
   portainer_production_stack_template: examples/portainer-production-stack.template.yml
+  live_cutover_script: scripts/live_cutover_portainer.py
 verification:
-  - command: /home/rootkeeper/.hermes/scripts/rootkeeper_model_preflight.py
+  - command: . /home/rootkeeper/.venvs/bkw-tariff-proxy/bin/activate && pytest -q && python -m py_compile src/bkw_tariff_proxy/*.py
     status: ok
-    result: Main provider openai-codex, main model gpt-5.5
-  - command: . /home/rootkeeper/.venvs/bkw-tariff-proxy/bin/activate && pytest -q
-    status: ok
-    result: 15 tests passed, 1 upstream TestClient warning
-  - command: python -m py_compile src/bkw_tariff_proxy/*.py
-    status: ok
-    result: all source files compiled
-  - command: local uvicorn smoke with BKW_TEST_DATA_MODE=synthetic
-    status: ok
-    result: health ok; status ok; status-code 0; relative/0 0.045000; horizon 24
+    result: 17 tests passed, 1 upstream TestClient warning; source files compiled
   - command: Portainer Docker API build image bkw-tariff-proxy:local
     status: ok
-    result: image built sha256:b99cc9496c74...
-  - command: Portainer stack update bkw-tariff-proxy-test with BKW_TEST_DATA_MODE=synthetic
+    result: image rebuilt with BKW CHF_kWh and quarter-hour-to-hour normalization
+  - command: Portainer stack update bkw-tariff-proxy-test with BKW_TEST_DATA_MODE=off
     status: ok
-    result: container healthy, non-root appuser
+    result: stack updated, container running healthy
   - command: curl http://192.168.5.40:8785/health and /v1 endpoints from Pi
     status: ok
-    result: health ok; root flat Loxone JSON ok; status ok; status-code 0; feedin_current_mchf_kwh 45; feedin_relative_00_mchf_kwh 45; feedin_relative_23_mchf_kwh 53; horizon 24
+    result: health ok; live BKW data; status partial_horizon before midnight; status-code 4; relative/23 0.005000; root Loxone JSON exposes integer mchf_kwh fields
+  - command: /home/rootkeeper/.hermes/scripts/bkw_dyntariffs_mqtt.py --dry-run
+    status: ok
+    result: MQTT bridge sees HTTP 200, 96 intervals, status ok, next tariff at 2026-07-03T00:00:00+02:00
 notes:
   - NAS mount does not support Python venv symlinks; development venv is /home/rootkeeper/.venvs/bkw-tariff-proxy.
-  - Current Synology deployment is a test stack using local image tag, not yet a public registry image.
-  - Synthetic values are fake and only for Loxone wiring/EMS gating tests while BKW returns 404.
-  - Before live BKW production operation, set BKW_TEST_DATA_MODE=off or remove the environment variable.
-  - Loxone Library/template export is intentionally deferred until real BKW data is available and the final name is agreed.
-  - The existing bkw-dyntariffs-mqtt-bridge Zeitauftrag currently acts as BKW API go-live sentinel; avoid duplicate watchdogs.
+  - Current Synology deployment still has the historic '*-test' stack/container name, but now runs live BKW data.
+  - Synthetic mode is disabled. Keep it only as explicit lab mode; production/live operation uses BKW_TEST_DATA_MODE=off or no variable.
+  - BKW live payload uses quarter-hour intervals. The proxy groups them into hourly Loxone relative slots using the conservative minimum feed-in value per hour.
+  - BKW currently publishes next-day values. Before midnight the HTTP proxy may show partial_horizon because +0/current is not yet available; this is safer than fake fallback values.
+  - Loxone Library/template export can now be finalized against live data once downstream optimizer behavior is confirmed.
+  - The existing bkw-dyntariffs-mqtt-bridge Zeitauftrag continues publishing/monitoring real API data; avoid duplicate watchdogs.
   - No GitHub account is required for local development.
   - Later public distribution should use a Git host and multi-arch container registry.

@@ -1,6 +1,6 @@
 # BKW API observations
 
-Observed from Rootkeeper on 2026-06-20.
+Observed from Rootkeeper.
 
 ## Swagger
 
@@ -37,9 +37,9 @@ Each price component has:
 
 For this product, use `feed_in[0].value` and normalize the declared `unit` to `CHF/kWh`.
 
-## Live endpoint status
+## Historical endpoint status — 2026-06-20
 
-Observed endpoints all returned naked 404 with zero-byte body:
+Observed endpoints returned naked 404 with zero-byte body:
 
 ```text
 https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn -> 404 bytes=0
@@ -48,4 +48,26 @@ https://api.bkw.ch/api/dyntariffs/v1/tariffs/energyreturn -> 404 bytes=0
 https://api.bkw.ch/api/dyntariffs/v1/tariffs/ -> 404 bytes=0
 ```
 
-Interpretation: treat 404 as `no_data`, not as application crash. Keep serving local status endpoints so Loxone can block optimization cleanly until BKW data appears.
+Interpretation at the time: treat 404 as `no_data`, not as application crash. Keep serving local status endpoints so Loxone can block optimization cleanly until BKW data appears.
+
+## Live endpoint status — 2026-07-02
+
+`GET /api/dyntariffs/v1/Tariffs/energyreturn` is live:
+
+```text
+HTTP: 200
+publication_timestamp: 2026-07-02T15:45:00Z
+interval_count: 96
+cadence: quarter-hour
+unit: CHF_kWh
+first_start_local: 2026-07-03T00:00:00+02:00
+last_end_local: 2026-07-04T00:00:00+02:00
+```
+
+Operational interpretation:
+
+- BKW publishes next-day feed-in data, currently 96 quarter-hour intervals.
+- The HTTP proxy groups quarter-hour values into hourly Loxone relative slots using the conservative hourly minimum.
+- Before midnight, `+0` may be unavailable because the feed begins at next local midnight. The proxy reports `partial_horizon` / status-code `4` instead of inventing fallback values.
+- From midnight, if a full 24-hour rolling horizon is available, status should become `ok` / status-code `0`.
+- Keep 404/no_data handling for resilience; do not remove it just because the API is currently live.

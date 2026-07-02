@@ -6,20 +6,23 @@ Base URL example:
 http://192.168.5.40:8785
 ```
 
-Current Synology test stack mode:
+Current Synology stack mode:
 
 ```text
-synthetic test data
+live BKW API data
+BKW_TEST_DATA_MODE=off
 ```
 
-Expected while this mode is enabled:
+Current live behavior observed on 2026-07-02 before midnight:
 
 ```text
-status-code -> 0
-+0...+23 -> numeric fake CHF/kWh values
+status-code -> 4
+status      -> partial_horizon
++7...+23    -> numeric live CHF/kWh values
++0...+6     -> unavailable until BKW data covers the current hour
 ```
 
-These values are for wiring tests only, not real BKW remuneration.
+This is expected while BKW publishes next-day values but the current day is not yet covered. Do **not** fill missing slots with fake `0`; the optimizer should block aggressive behavior until `status_code == 0`.
 
 Spotpreis-Optimierer mode:
 
@@ -49,6 +52,8 @@ mchf_kwh = milli-CHF/kWh
 ```
 
 For the Spotpreis-Optimierer, the scale is fine as-is because the relative ordering is unchanged. For display in CHF/kWh, apply a correction/factor of `0.001` in Loxone.
+
+BKW live data is quarter-hourly. The proxy groups quarter-hour `feed_in` values into hourly relative slots and uses the **minimum** feed-in value inside each hour. That is conservative for hourly EMS decisions: a weak quarter-hour is not hidden by a better quarter-hour in the same block.
 
 Command recognition examples:
 

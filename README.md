@@ -10,16 +10,16 @@ This service polls BKW once, caches the result locally, and exposes simple LAN H
 
 ## Current status
 
-Docker/FastAPI MVP is deployed on Synology/Portainer and currently runs in synthetic Loxone test mode.
+Docker/FastAPI MVP is deployed on Synology/Portainer and runs against the live BKW Dynamic Tariffs API.
 
-Observed BKW state on 2026-06-20:
+Observed BKW state:
 
 ```text
-Swagger: 200 OK
-Live tariff endpoints: 404 with empty body
+2026-06-20: Swagger 200 OK, live tariff endpoints 404/no_data
+2026-07-02: /Tariffs/energyreturn 200 OK, 96 quarter-hour feed_in intervals, unit CHF_kWh
 ```
 
-The app treats BKW 404 as `no_data`, not as a crash.
+The app still treats BKW 404 as `no_data` for resilience, but normal production operation now expects live tariff data. BKW currently publishes next-day values; before midnight the proxy may report `partial_horizon` because `+0` for the current hour is not yet present.
 
 ## Local development
 
@@ -47,7 +47,7 @@ python -m py_compile src/bkw_tariff_proxy/*.py
 Current verification:
 
 ```text
-15 passed, 1 warning
+17 passed, 1 warning
 ```
 
 The remaining warning is from FastAPI/Starlette TestClient internals, not from application code.
@@ -71,15 +71,17 @@ curl http://127.0.0.1:8785/v1/status-code
 curl http://127.0.0.1:8785/v1/feedin/relative.json
 ```
 
-With current BKW 404 state, expected output is:
+With live BKW next-day data before midnight, expected output can be:
 
 ```text
 /health -> 200 ok
-/v1/status -> 200 no_data
-/v1/status-code -> 200 1
-/v1/feedin/relative.json -> 200 {"status":"no_data",...}
-/v1/feedin/current-and-status -> 503 {"detail":"no valid current feed-in value"}
+/v1/status -> 200 partial_horizon
+/v1/status-code -> 200 4
+/v1/feedin/relative.json -> 200 {"status":"ok", "horizon_hours": <partial>, ...}
+/v1/feedin/current-and-status -> 503 until +0 exists
 ```
+
+From midnight, if BKW provides the full next 24 hours, status should become `ok` / `status-code 0`.
 
 ## Docker compose example
 
@@ -90,7 +92,7 @@ docker compose up -d --build
 
 Docker is not installed on the Rootkeeper Pi, but the image has been built and run on Synology Docker through Portainer.
 
-Current Portainer test deployment:
+Current Portainer deployment:
 
 ```text
 Stack: bkw-tariff-proxy-test
@@ -99,21 +101,21 @@ Container: bkw-tariff-proxy-test
 URL from Hausnetz: http://192.168.5.40:8785
 Image: bkw-tariff-proxy:local
 Health: healthy
-Mode: synthetic Loxone test data
-Status: ok / status-code 0
+Mode: live BKW API; BKW_TEST_DATA_MODE=off
+Current pre-midnight status: partial_horizon / status-code 4
 ```
 
 See `docs/portainer-test-deployment.md` for the exact evidence and the volume-permission pitfall fixed during testing.
 
 The container image runs as non-root `appuser`, exposes port `8785`, persists `/data`, and has a `/health` healthcheck.
 
-Production is intentionally not deployed yet. The prepared template is:
+The current local stack is already switched to live BKW mode. The production template remains useful for later renaming/public distribution:
 
 ```text
 examples/portainer-production-stack.template.yml
 ```
 
-Before production use, agree the final product/container/template name, verify real BKW live tariff data, and keep the synthetic test stack separate. See:
+Before public/product use, agree the final product/container/template name and decide whether to rename the local `*-test` stack. See:
 
 ```text
 docs/go-live-and-naming-plan.md
@@ -121,7 +123,7 @@ docs/go-live-and-naming-plan.md
 
 ## Synthetic Loxone test mode
 
-While BKW live endpoints still return `404`, the Portainer test stack can run with rolling synthetic values:
+Synthetic mode is now disabled in the Synology stack. Keep it only as an explicit lab/testing tool:
 
 ```yaml
 BKW_TEST_DATA_MODE: synthetic
@@ -149,9 +151,9 @@ feedin_relative_00_mchf_kwh ... feedin_relative_23_mchf_kwh
 
 For Loxone command recognitions, prefer the `*_mchf_kwh` integer fields. They are scaled as milli-CHF/kWh, so `45` means `0.045 CHF/kWh`. This avoids decimal separator parsing issues in Loxone where a JSON value such as `0.045` may be highlighted correctly but evaluated as `0`.
 
-These values are deliberately fake and are only for validating Loxone virtual HTTP inputs, freshness, parsing, template export, and EMS gating. Disable the variable or set it to `off` before switching to real BKW data.
+These values are deliberately fake and are only for validating Loxone virtual HTTP inputs, freshness, parsing, template export, and EMS gating. Production/live operation must use `BKW_TEST_DATA_MODE=off` or no variable.
 
-The final Loxone Library/template export is intentionally deferred until real BKW data is available and the final name is agreed.
+The final Loxone Library/template export can now be finalized against real BKW data once the downstream Loxone optimizer behavior is confirmed.
 
 ## Endpoint shape
 
