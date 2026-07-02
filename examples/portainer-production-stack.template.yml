@@ -1,18 +1,18 @@
 # Production stack template for the BKW tariff HTTP proxy.
 #
-# Do not deploy blindly. Before production use:
-# 1. agree on the final product/container name,
-# 2. verify BKW live API returns real tariff data,
-# 3. keep BKW_TEST_DATA_MODE off/absent,
-# 4. bind the port to the intended Synology LAN IP only.
+# Before production use:
+# 1. pin the desired image tag,
+# 2. keep BKW_TEST_DATA_MODE off/absent,
+# 3. bind the port only to the intended LAN interface if your host has multiple networks,
+# 4. verify /health, /v1/status-code and /v1/loxone.json before connecting Loxone automation.
 
 services:
   bkw-tariff-proxy:
-    image: bkw-tariff-proxy:local
+    image: ghcr.io/4fingereddy/bkw-tariff-proxy:0.1.0
     container_name: bkw-tariff-proxy
     restart: unless-stopped
     ports:
-      - "192.168.5.40:8785:8785"
+      - "8785:8785"
     environment:
       TZ: Europe/Zurich
       DATA_DIR: /data
@@ -20,10 +20,14 @@ services:
       POLL_INTERVAL_SECONDS: "900"
       CACHE_MAX_AGE_SECONDS: "5400"
       REQUIRE_FULL_HORIZON: "true"
-      # Production must not use synthetic test data.
       BKW_TEST_DATA_MODE: "off"
     volumes:
       - bkw-tariff-proxy-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8785/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   bkw-tariff-proxy-data:

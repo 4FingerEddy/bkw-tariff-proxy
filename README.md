@@ -1,65 +1,154 @@
 # bkw-tariff-proxy
 
-Docker HTTP service for BKW dynamic feed-in tariffs and Loxone virtual HTTP inputs.
+HTTP proxy for BKW dynamic feed-in tariffs and Loxone virtual HTTP inputs.
 
-## Product goal
+The service polls BKW's dynamic feed-in tariff endpoint, caches the result locally, normalizes quarter-hour values into Loxone-friendly hourly relative slots, and exposes simple HTTP endpoints for Loxone command recognitions.
 
-BKW Dynamic Feed-in Tariff → local Docker HTTP service → Loxone Spotpreis-Optimierer in relative mode.
+## Features
 
-This service polls BKW once, caches the result locally, and exposes simple LAN HTTP endpoints so Loxone does not need to parse complex JSON or talk to BKW directly.
+- FastAPI HTTP service packaged as a Docker container.
+- Local cache under `/data` so short upstream outages do not immediately break reads.
+- BKW `feed_in` values normalized to `CHF/kWh`.
+- Hourly relative slots `+0 ... +23` computed as the arithmetic mean of available quarter-hour values inside each hour.
+- Integer `mCHF/kWh` fields for Loxone, avoiding decimal separator parsing issues.
+- Numeric status code for simple Loxone guard logic.
+- Non-root container user and Docker healthcheck.
+- Optional synthetic test mode for Loxone wiring tests.
 
-## Current status
+## Container image
 
-Docker/FastAPI MVP is deployed on Synology/Portainer and runs against the live BKW Dynamic Tariffs API.
-
-Observed BKW state:
+Recommended image name after release:
 
 ```text
-2026-06-20: Swagger 200 OK, live tariff endpoints 404/no_data
-2026-07-02: /Tariffs/energyreturn 200 OK, 96 quarter-hour feed_in intervals, unit CHF_kWh
+ghcr.io/4fingereddy/bkw-tariff-proxy:<version>
 ```
 
-The app still treats BKW 404 as `no_data` for resilience, but normal production operation now expects live tariff data. BKW currently publishes next-day values; before midnight the proxy may report `partial_horizon` because `+0` for the current hour is not yet present.
+Example:
+
+```bash
+docker run -d \
+  --name bkw-tariff-proxy \
+  --restart unless-stopped \
+  -p 8785:8785 \
+  -v bkw-tariff-proxy-data:/data \
+  ghcr.io/4fingereddy/bkw-tariff-proxy:0.1.0
+```
+
+## Docker Compose
+
+```yaml
+services:
+  bkw-tariff-proxy:
+    image: ghcr.io/4fingereddy/bkw-tariff-proxy:0.1.0
+    container_name: bkw-tariff-proxy
+    restart: unless-stopped
+    ports:
+      - "8785:8785"
+    environment:
+      TZ: Europe/Zurich
+      DATA_DIR: /data
+      BKW_ENDPOINT: https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn
+      POLL_INTERVAL_SECONDS: "900"
+      CACHE_MAX_AGE_SECONDS: "5400"
+      REQUIRE_FULL_HORIZON: "true"
+      BKW_TEST_DATA_MODE: "off"
+    volumes:
+      - bkw-tariff-proxy-data:/data
+
+volumes:
+  bkw-tariff-proxy-data:
+```
+
+## Configuration
+
+Environment variables:
+
+- `BKW_ENDPOINT`: BKW tariff endpoint. Default: `https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn`.
+- `POLL_INTERVAL_SECONDS`: background polling interval. Default: `900`.
+- `CACHE_MAX_AGE_SECONDS`: maximum age for cached `ok` data before reporting `stale`. Default: `5400`.
+- `DATA_DIR`: cache directory inside the container. Default: `/data`.
+- `TZ`: timezone used by the container. Default: `Europe/Zurich`.
+- `REQUIRE_FULL_HORIZON`: when true, report `partial_horizon` unless 24 hourly slots are available. Default: `true`.
+- `BKW_TEST_DATA_MODE`: set to `synthetic` only for lab/Loxone wiring tests. Production should use `off` or omit the variable.
+
+## Endpoints
+
+- `GET /health` → `ok`
+- `GET /` → flat Loxone JSON payload
+- `GET /v1/loxone.json` → same flat Loxone JSON payload
+- `GET /v1/status` → text status
+- `GET /v1/status-code` → numeric status for Loxone logic
+- `GET /v1/feedin/current` → current `+0` value in `CHF/kWh`, or HTTP 503 if unavailable
+- `GET /v1/feedin/current-and-status` → `status_code;value`, for example `0;0.081000`
+- `GET /v1/feedin/relative/{offset}` → `CHF/kWh` value for offset `0 ... 23`, or HTTP 503 if unavailable
+- `GET /v1/feedin/relative.json` → normalized debug JSON
+
+## Loxone JSON fields
+
+The flat root payload contains:
+
+```text
+status
+status_code
+updated_at
+unit
+horizon_hours
+feedin_current
+feedin_current_mchf_kwh
+feedin_relative_00 ... feedin_relative_23
+feedin_relative_00_mchf_kwh ... feedin_relative_23_mchf_kwh
+```
+
+For Loxone command recognitions, prefer the integer fields:
+
+```text
+status-code -> \i"status_code":\i\v
+current     -> \i"feedin_current_mchf_kwh":\i\v
++0          -> \i"feedin_relative_00_mchf_kwh":\i\v
++1          -> \i"feedin_relative_01_mchf_kwh":\i\v
++23         -> \i"feedin_relative_23_mchf_kwh":\i\v
+```
+
+Scale:
+
+```text
+45 = 0.045 CHF/kWh
+factor for CHF/kWh display = 0.001
+```
+
+## Status codes
+
+- `0`: OK — data valid and full horizon available.
+- `1`: No data — BKW returned no usable tariff data.
+- `2`: Stale — last valid data is too old.
+- `3`: API error — upstream request or processing failed.
+- `4`: Partial horizon — data exists, but fewer than 24 hourly slots are available.
+- `5`: Unknown unit — upstream unit is not safely understood.
+- `99`: Unknown internal state.
+
+Recommended Loxone guard:
+
+```text
+status_code == 0 -> optimizer may use values
+status_code != 0 -> block/neutralize optimization
+```
 
 ## Local development
 
-The source lives on the Synology NAS mount:
-
-```text
-/mnt/synology-rootkeeper/projects/bkw-tariff-proxy
-```
-
-Because the NAS mount does not support the symlinks needed by Python venvs, the development venv is local on the Pi:
-
-```text
-/home/rootkeeper/.venvs/bkw-tariff-proxy
-```
-
-Run tests:
-
 ```bash
-cd /mnt/synology-rootkeeper/projects/bkw-tariff-proxy
-. /home/rootkeeper/.venvs/bkw-tariff-proxy/bin/activate
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e '.[dev]'
 pytest -q
 python -m py_compile src/bkw_tariff_proxy/*.py
 ```
 
-Current verification:
-
-```text
-17 passed, 1 warning
-```
-
-The remaining warning is from FastAPI/Starlette TestClient internals, not from application code.
-
-## Run locally without Docker
+Run locally:
 
 ```bash
-cd /mnt/synology-rootkeeper/projects/bkw-tariff-proxy
 DATA_DIR=/tmp/bkw-tariff-proxy-data \
-  /home/rootkeeper/.venvs/bkw-tariff-proxy/bin/uvicorn bkw_tariff_proxy.main:app \
-  --host 127.0.0.1 \
-  --port 8785
+  uvicorn bkw_tariff_proxy.main:app --host 127.0.0.1 --port 8785
 ```
 
 Smoke check:
@@ -68,113 +157,27 @@ Smoke check:
 curl http://127.0.0.1:8785/health
 curl http://127.0.0.1:8785/v1/status
 curl http://127.0.0.1:8785/v1/status-code
-curl http://127.0.0.1:8785/v1/feedin/relative.json
+curl http://127.0.0.1:8785/v1/loxone.json
 ```
 
-With live BKW next-day data before midnight, expected output can be:
+## Synthetic test mode
 
-```text
-/health -> 200 ok
-/v1/status -> 200 partial_horizon
-/v1/status-code -> 200 4
-/v1/feedin/relative.json -> 200 {"status":"ok", "horizon_hours": <partial>, ...}
-/v1/feedin/current-and-status -> 503 until +0 exists
-```
-
-From midnight, if BKW provides the full next 24 hours, status should become `ok` / `status-code 0`.
-
-## Docker compose example
-
-```bash
-cd /mnt/synology-rootkeeper/projects/bkw-tariff-proxy/examples
-docker compose up -d --build
-```
-
-Docker is not installed on the Rootkeeper Pi, but the image has been built and run on Synology Docker through Portainer.
-
-Current Portainer deployment:
-
-```text
-Stack: bkw-tariff-proxy-test
-Portainer stack ID: 22
-Container: bkw-tariff-proxy-test
-URL from Hausnetz: http://192.168.5.40:8785
-Image: bkw-tariff-proxy:local
-Health: healthy
-Mode: live BKW API; BKW_TEST_DATA_MODE=off
-Current pre-midnight status: partial_horizon / status-code 4
-```
-
-See `docs/portainer-test-deployment.md` for the exact evidence and the volume-permission pitfall fixed during testing.
-
-The container image runs as non-root `appuser`, exposes port `8785`, persists `/data`, and has a `/health` healthcheck.
-
-The current local stack is already switched to live BKW mode. The production template remains useful for later renaming/public distribution:
-
-```text
-examples/portainer-production-stack.template.yml
-```
-
-Before public/product use, agree the final product/container/template name and decide whether to rename the local `*-test` stack. See:
-
-```text
-docs/go-live-and-naming-plan.md
-```
-
-## Synthetic Loxone test mode
-
-Synthetic mode is now disabled in the Synology stack. Keep it only as an explicit lab/testing tool:
+For Loxone wiring tests without live BKW dependency:
 
 ```yaml
 BKW_TEST_DATA_MODE: synthetic
 ```
 
-Effects:
+Synthetic values are deliberately fake and must not be used for production energy optimization.
 
-```text
-/ -> flat Loxone template JSON
-/v1/loxone.json -> same flat Loxone template JSON
-/v1/status -> ok
-/v1/status-code -> 0
-/v1/feedin/relative/0...23 -> 24 plain numeric CHF/kWh test values
-```
+## Safety notes
 
-Flat root fields for command recognitions:
+- Do not expose this service directly to the internet.
+- Do not treat missing tariff values as zero.
+- Do not guess unknown units; fail visibly instead.
+- Keep `/data` persistent.
+- Configure Loxone to block optimization unless `status_code == 0`.
 
-```text
-status_code
-feedin_current
-feedin_current_mchf_kwh
-feedin_relative_00 ... feedin_relative_23
-feedin_relative_00_mchf_kwh ... feedin_relative_23_mchf_kwh
-```
+## License
 
-For Loxone command recognitions, prefer the `*_mchf_kwh` integer fields. They are scaled as milli-CHF/kWh, so `45` means `0.045 CHF/kWh`. This avoids decimal separator parsing issues in Loxone where a JSON value such as `0.045` may be highlighted correctly but evaluated as `0`.
-
-These values are deliberately fake and are only for validating Loxone virtual HTTP inputs, freshness, parsing, template export, and EMS gating. Production/live operation must use `BKW_TEST_DATA_MODE=off` or no variable.
-
-The final Loxone Library/template export can now be finalized against real BKW data once the downstream Loxone optimizer behavior is confirmed.
-
-## Endpoint shape
-
-- `GET /health` → `ok`
-- `GET /` → flat Loxone template JSON for parent virtual HTTP input command recognitions
-- `GET /v1/loxone.json` → same flat Loxone template JSON as `/`
-- `GET /v1/status` → `ok`, `no_data`, `stale`, `api_error`, `partial_horizon`, `unit_unknown`
-- `GET /v1/status-code` → numeric status for Loxone
-- `GET /v1/feedin/current` → plain numeric CHF/kWh, or 503 when unavailable
-- `GET /v1/feedin/current-and-status` → `status_code;value`, e.g. `0;0.081000`
-- `GET /v1/feedin/relative/{offset}` → plain numeric CHF/kWh for `+0 ... +23`, or 503 when unavailable
-- `GET /v1/feedin/relative.json` → full normalized debug JSON
-
-## Status code mapping
-
-```text
-0 = ok
-1 = no_data
-2 = stale
-3 = api_error
-4 = partial_horizon
-5 = unit_unknown
-99 = unknown internal state
-```
+MIT

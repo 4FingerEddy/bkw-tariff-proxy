@@ -67,7 +67,7 @@ last_end_local: 2026-07-04T00:00:00+02:00
 Operational interpretation:
 
 - BKW publishes next-day feed-in data, currently 96 quarter-hour intervals.
-- The HTTP proxy groups quarter-hour values into hourly Loxone relative slots using the conservative hourly minimum.
+- The HTTP proxy groups quarter-hour values into hourly Loxone relative slots using the arithmetic mean of the available quarter-hour values inside each hour.
 - Before midnight, `+0` may be unavailable because the feed begins at next local midnight. The proxy reports `partial_horizon` / status-code `4` instead of inventing fallback values.
 - From midnight, if a full 24-hour rolling horizon is available, status should become `ok` / status-code `0`.
 - Keep 404/no_data handling for resilience; do not remove it just because the API is currently live.

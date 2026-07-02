@@ -2,6 +2,8 @@
 name = "bkw-tariff-proxy"
 version = "0.1.0"
 description = "Docker HTTP proxy for BKW dynamic feed-in tariffs and Loxone virtual HTTP inputs."
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.111",

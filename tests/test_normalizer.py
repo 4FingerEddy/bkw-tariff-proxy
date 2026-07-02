@@ -49,7 +49,7 @@ class BkwPayloadNormalizationTests(unittest.TestCase):
         self.assertEqual(normalized["relative"][1]["offset"], 1)
         self.assertEqual(normalized["relative"][1]["value"], 0.077)
 
-    def test_groups_quarter_hour_feed_in_prices_to_one_conservative_hourly_slot(self):
+    def test_groups_quarter_hour_feed_in_prices_to_one_average_hourly_slot(self):
         payload = {
             "publication_timestamp": "2026-07-02T15:35:00Z",
             "prices": [
@@ -87,7 +87,7 @@ class BkwPayloadNormalizationTests(unittest.TestCase):
         self.assertEqual(normalized["status"], "ok")
         self.assertEqual(normalized["horizon_hours"], 2)
         self.assertEqual(normalized["relative"][0]["offset"], 0)
-        self.assertEqual(normalized["relative"][0]["value"], 0.087)
+        self.assertEqual(normalized["relative"][0]["value"], 0.09075)
         self.assertEqual(normalized["relative"][0]["interval_count"], 4)
         self.assertEqual(normalized["relative"][1]["offset"], 1)
         self.assertEqual(normalized["relative"][1]["value"], 0.101)

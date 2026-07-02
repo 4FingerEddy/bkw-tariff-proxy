@@ -107,10 +107,16 @@ Go-live and naming checklist:
 docs/go-live-and-naming-plan.md
 ```
 
-The image was built through Portainer's Docker API proxy and is currently tagged on Synology as:
+The historic Synology stack currently runs a locally built image until the GHCR release cutover is complete:
 
 ```text
 bkw-tariff-proxy:local
+```
+
+The target published image shape is:
+
+```text
+ghcr.io/4fingereddy/bkw-tariff-proxy:<version>
 ```
 
 For a manual Docker-capable host, the generic compose example remains:
@@ -134,9 +140,9 @@ See:
 docs/bkw-api-observations.md
 ```
 
-Current live state: BKW Swagger is reachable; tariff endpoints return 404 with empty body. The service maps that to `no_data` and keeps Loxone endpoints available.
+Current live state: BKW energy-return endpoint returns HTTP 200 with 96 quarter-hour feed-in intervals. The service computes hourly arithmetic means for Loxone relative slots and reports `partial_horizon` before the current rolling 24-hour horizon is complete.
 
-The existing `bkw-dyntariffs-mqtt-bridge` Zeitauftrag checks the BKW live API every 15 minutes and acts as the current go-live sentinel. Do not add another BKW API watchdog unless that job is paused or retired.
+The old BKW MQTT bridge is retired. Production integration is Docker HTTP proxy -> Loxone Virtual HTTP Input.
 
 ## Safety notes
 

@@ -1,16 +1,25 @@
 services:
   bkw-tariff-proxy:
-    build: ..
-    image: bkw-tariff-proxy:local
+    image: ghcr.io/4fingereddy/bkw-tariff-proxy:0.1.0
     container_name: bkw-tariff-proxy
     restart: unless-stopped
     ports:
       - "8785:8785"
     environment:
       TZ: Europe/Zurich
+      DATA_DIR: /data
       BKW_ENDPOINT: https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn
       POLL_INTERVAL_SECONDS: "900"
       CACHE_MAX_AGE_SECONDS: "5400"
       REQUIRE_FULL_HORIZON: "true"
+      BKW_TEST_DATA_MODE: "off"
     volumes:
-      - ./data:/data
+      - bkw-tariff-proxy-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8785/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  bkw-tariff-proxy-data:

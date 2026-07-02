@@ -53,7 +53,7 @@ mchf_kwh = milli-CHF/kWh
 
 For the Spotpreis-Optimierer, the scale is fine as-is because the relative ordering is unchanged. For display in CHF/kWh, apply a correction/factor of `0.001` in Loxone.
 
-BKW live data is quarter-hourly. The proxy groups quarter-hour `feed_in` values into hourly relative slots and uses the **minimum** feed-in value inside each hour. That is conservative for hourly EMS decisions: a weak quarter-hour is not hidden by a better quarter-hour in the same block.
+BKW live data is quarter-hourly. The proxy groups quarter-hour `feed_in` values into hourly relative slots and uses the **arithmetic mean** of the available quarter-hour values inside each hour. This gives the Spotpreis-Optimierer a representative hourly value while keeping the direct BKW CHF/kWh scale.
 
 Command recognition examples:
 

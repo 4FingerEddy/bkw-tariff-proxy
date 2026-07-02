@@ -114,13 +114,12 @@ def normalize_bkw_payload(
     for offset in sorted(hourly):
         parts = sorted(hourly[offset], key=lambda slot: slot.start)
         # BKW live data is quarter-hourly. Loxone receives hourly relative slots.
-        # For feed-in optimization use the conservative hourly value: the minimum
-        # remuneration within the hour. This avoids treating a weak quarter-hour
-        # as if the full hour had the better price.
+        # Use the arithmetic mean of all feed-in values within the hour so the
+        # Spotpreis-Optimierer receives the representative hourly remuneration.
         slots.append(
             NormalizedSlot(
                 offset=offset,
-                value=round(min(slot.value for slot in parts), 6),
+                value=round(sum(slot.value for slot in parts) / len(parts), 6),
                 start=parts[0].start,
                 end=parts[-1].end,
                 interval_count=len(parts),

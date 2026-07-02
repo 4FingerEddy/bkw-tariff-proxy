@@ -1,5 +1,17 @@
 FROM python:3.12-slim
 
+ARG VERSION=0.1.0
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+
+LABEL org.opencontainers.image.title="bkw-tariff-proxy" \
+      org.opencontainers.image.description="HTTP proxy for BKW dynamic feed-in tariffs and Loxone virtual HTTP inputs" \
+      org.opencontainers.image.source="https://github.com/4FingerEddy/bkw-tariff-proxy" \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.revision="$VCS_REF" \
+      org.opencontainers.image.created="$BUILD_DATE" \
+      org.opencontainers.image.licenses="MIT"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DATA_DIR=/data \
