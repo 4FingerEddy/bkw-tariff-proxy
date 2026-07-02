@@ -3,7 +3,7 @@ owner: Patrick / Rootkeeper
 storage: /mnt/synology-rootkeeper/projects/bkw-tariff-proxy
 created_at: "2026-06-20T21:34:00+02:00"
 updated_at: "2026-07-02T20:50:00+02:00"
-status: release-prep-ghcr
+status: released-ghcr-portainer-cutover-blocked-by-package-visibility
 secrets: none-in-project
 git:
   branch: main
@@ -93,4 +93,5 @@ notes:
   - Average aggregation deployed to Synology/Portainer on 2026-07-02; audit: /mnt/synology-rootkeeper/reports/bkw-tariff-proxy/live-cutover/20260702_194108.
   - BKW currently publishes next-day values. Before midnight the HTTP proxy may show partial_horizon because +0/current is not yet available; this is safer than fake fallback values.
   - Loxone Library/template export can now be finalized against live data once downstream optimizer behavior is confirmed.
-  - GHCR release target: ghcr.io/4fingereddy/bkw-tariff-proxy:<version>. First publication should stay private until Patrick explicitly chooses public visibility.
+  - GHCR release target: ghcr.io/4fingereddy/bkw-tariff-proxy:<version>. v0.1.0 is released with digest sha256:f80b68292d4c1eea0ef0eb8ac8ac29f3bb0dfcf2d68d807bb37a2b748b754d59. Portainer cutover is blocked until GHCR package visibility is public or registry credentials with read:packages are configured.
+  - Release audit: /mnt/synology-rootkeeper/reports/bkw-tariff-proxy/releases/20260702_210318.
