@@ -24,6 +24,31 @@ status      -> partial_horizon
 
 This is expected while BKW publishes next-day values but the current day is not yet covered. Do **not** fill missing slots with fake `0`; the optimizer should block aggressive behavior until `status_code == 0`.
 
+For troubleshooting, use `/v1/feedin/relative.json` as the tracking endpoint. It separates the values clearly:
+
+```text
+status / status_code              -> effective safety status used by Loxone
+source_status                     -> cached service status after the latest refresh
+normalized_status                 -> raw/normalizer status of the BKW payload
+safe_values_available             -> true only when plain value endpoints may be used
+relative[]                        -> diagnostic relative slots; may contain values even when safety status is not OK
+```
+
+Example before midnight when BKW already published tomorrow's complete day but the current relative horizon is incomplete:
+
+```json
+{
+  "status": "partial_horizon",
+  "status_code": 4,
+  "source_status": "partial_horizon",
+  "normalized_status": "ok",
+  "effective_status": "partial_horizon",
+  "effective_status_code": 4,
+  "safe_values_available": false,
+  "horizon_hours": 17
+}
+```
+
 Spotpreis-Optimierer mode:
 
 ```text

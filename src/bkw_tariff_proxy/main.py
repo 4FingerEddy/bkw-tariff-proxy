@@ -48,12 +48,29 @@ def status_code() -> str:
 
 @app.get("/v1/feedin/relative.json")
 def relative_json() -> dict:
-    return {
-        "status": service.state.status,
+    """Return diagnostic relative tariff data with unambiguous status fields.
+
+    ``service.state.normalized`` carries the source/normalizer status from the
+    latest BKW payload. The operational status used by Loxone may be stricter
+    because it also includes freshness and full-horizon safety gates. Expose
+    both explicitly so operators can distinguish "BKW payload was parseable"
+    from "safe to use for EMS optimization".
+    """
+    effective_status = service.effective_status()
+    payload = {
+        **service.state.normalized,
+        "source_status": service.state.status,
+        "normalized_status": service.state.normalized.get("status", service.state.status),
+        "effective_status": effective_status,
+        "effective_status_code": service.status_code(),
+        "status": effective_status,
+        "status_code": service.status_code(),
+        "safe_values_available": effective_status == "ok",
         "updated_at": service.state.updated_at,
         "last_error": service.state.last_error,
-        **service.state.normalized,
+        "last_http_status": service.state.last_http_status,
     }
+    return payload
 
 
 @app.get("/v1/feedin/current", response_class=Response)

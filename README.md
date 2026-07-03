@@ -81,7 +81,7 @@ Environment variables:
 - `GET /v1/feedin/current` → current `+0` value in `CHF/kWh`, or HTTP 503 if unavailable or status is not `ok`
 - `GET /v1/feedin/current-and-status` → `status_code;value`, for example `0;0.081000`; HTTP 503 unless status is `ok`
 - `GET /v1/feedin/relative/{offset}` → `CHF/kWh` value for offset `0 ... 23`, or HTTP 503 if unavailable or status is not `ok`
-- `GET /v1/feedin/relative.json` → normalized debug JSON; may include cached values even when status is degraded
+- `GET /v1/feedin/relative.json` → diagnostic relative JSON. `status` / `status_code` are the effective safety status used by Loxone; `source_status` and `normalized_status` show the latest cached/upstream payload state. `safe_values_available=false` means listed diagnostic values must not be used for EMS optimization.
 
 ## Loxone JSON fields
 

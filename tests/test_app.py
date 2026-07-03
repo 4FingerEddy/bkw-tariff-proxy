@@ -77,6 +77,60 @@ def test_status_endpoint_uses_effective_stale_status():
     assert client.get("/v1/status-code").text == "2"
 
 
+def test_relative_json_exposes_source_and_effective_status():
+    set_state(
+        TariffState(
+            status="partial_horizon",
+            normalized={
+                "status": "ok",
+                "unit": "CHF/kWh",
+                "horizon_hours": 17,
+                "relative": [{"offset": 7, "value": 0.105}],
+            },
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            last_error=None,
+            last_http_status=200,
+        )
+    )
+
+    response = client.get("/v1/feedin/relative.json")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["status"] == "partial_horizon"
+    assert payload["status_code"] == 4
+    assert payload["effective_status"] == "partial_horizon"
+    assert payload["effective_status_code"] == 4
+    assert payload["source_status"] == "partial_horizon"
+    assert payload["normalized_status"] == "ok"
+    assert payload["safe_values_available"] is False
+    assert payload["horizon_hours"] == 17
+    assert payload["relative"] == [{"offset": 7, "value": 0.105}]
+
+
+def test_relative_json_marks_safe_values_available_when_effective_ok():
+    set_state(
+        TariffState(
+            status="ok",
+            normalized={
+                "status": "ok",
+                "unit": "CHF/kWh",
+                "horizon_hours": 24,
+                "relative": [{"offset": 0, "value": 0.081}],
+            },
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            last_error=None,
+            last_http_status=200,
+        )
+    )
+
+    payload = client.get("/v1/feedin/relative.json").json()
+
+    assert payload["status"] == "ok"
+    assert payload["status_code"] == 0
+    assert payload["safe_values_available"] is True
+
+
 def test_current_endpoint_blocks_cached_value_when_status_not_ok():
     set_state(
         TariffState(
