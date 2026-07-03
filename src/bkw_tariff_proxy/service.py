@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -9,7 +12,7 @@ from typing import Any
 import httpx
 
 from .config import Settings
-from .normalizer import TariffNormalizationError, normalize_bkw_payload
+from .normalizer import TariffNormalizationError, TariffPayloadError, normalize_bkw_payload
 
 
 STATUS_CODES = {
@@ -20,6 +23,9 @@ STATUS_CODES = {
     "partial_horizon": 4,
     "unit_unknown": 5,
 }
+
+logger = logging.getLogger(__name__)
+EXPECTED_LIVE_INTERVALS_PER_HOUR = 4
 
 
 @dataclass
@@ -74,19 +80,41 @@ class TariffService:
 
     def _save_cache(self) -> None:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self.cache_path.write_text(
-            json.dumps(self.state.__dict__, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        payload = json.dumps(self.state.__dict__, indent=2, sort_keys=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=".cache.", suffix=".json", dir=self.cache_path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+                tmp_file.write(payload)
+                tmp_file.flush()
+                os.fsync(tmp_file.fileno())
+            os.replace(tmp_name, self.cache_path)
+        finally:
+            try:
+                os.unlink(tmp_name)
+            except FileNotFoundError:
+                pass
+
+    def _derive_status(self, normalized: dict[str, Any], *, live_quarter_hour_data: bool) -> str:
+        status = normalized["status"]
+        if status == "ok" and self.settings.require_full_horizon:
+            if normalized.get("horizon_hours", 0) < 24:
+                return "partial_horizon"
+            if live_quarter_hour_data and normalized.get("min_interval_count", 0) < EXPECTED_LIVE_INTERVALS_PER_HOUR:
+                return "partial_horizon"
+        return status
+
+    def _set_status(self, status: str, *, reason: str | None = None) -> None:
+        previous = self.state.status
+        self.state.status = status
+        if status != previous or status != "ok":
+            logger.warning("BKW tariff status=%s previous=%s reason=%s", status, previous, reason)
 
     async def refresh_once(self) -> TariffState:
         try:
             if self.settings.test_data_mode == "synthetic":
                 now = datetime.now(timezone.utc)
                 normalized = normalize_bkw_payload(build_synthetic_bkw_payload(now), now=now)
-                status = normalized["status"]
-                if status == "ok" and self.settings.require_full_horizon and normalized.get("horizon_hours", 0) < 24:
-                    status = "partial_horizon"
+                status = self._derive_status(normalized, live_quarter_hour_data=False)
                 self.state = TariffState(
                     status=status,
                     normalized=normalized,
@@ -101,15 +129,13 @@ class TariffService:
                 response = await client.get(self.settings.bkw_endpoint)
             self.state.last_http_status = response.status_code
             if response.status_code == 404:
-                self.state.status = "no_data"
+                self._set_status("no_data", reason="BKW endpoint returned 404/no_data")
                 self.state.last_error = "BKW endpoint returned 404/no_data"
                 self._save_cache()
                 return self.state
             response.raise_for_status()
             normalized = normalize_bkw_payload(response.json(), now=datetime.now(timezone.utc))
-            status = normalized["status"]
-            if status == "ok" and self.settings.require_full_horizon and normalized.get("horizon_hours", 0) < 24:
-                status = "partial_horizon"
+            status = self._derive_status(normalized, live_quarter_hour_data=True)
             self.state = TariffState(
                 status=status,
                 normalized=normalized,
@@ -119,13 +145,18 @@ class TariffService:
             )
             self._save_cache()
             return self.state
+        except TariffPayloadError as exc:
+            self._set_status("api_error", reason=str(exc))
+            self.state.last_error = str(exc)
+            self._save_cache()
+            return self.state
         except TariffNormalizationError as exc:
-            self.state.status = "unit_unknown"
+            self._set_status("unit_unknown", reason=str(exc))
             self.state.last_error = str(exc)
             self._save_cache()
             return self.state
         except Exception as exc:
-            self.state.status = "api_error"
+            self._set_status("api_error", reason=str(exc))
             self.state.last_error = str(exc)
             self._save_cache()
             return self.state
@@ -149,3 +180,8 @@ class TariffService:
             if slot.get("offset") == offset:
                 return slot.get("value")
         return None
+
+    def safe_relative_value(self, offset: int) -> float | None:
+        if self.effective_status() != "ok":
+            return None
+        return self.relative_value(offset)

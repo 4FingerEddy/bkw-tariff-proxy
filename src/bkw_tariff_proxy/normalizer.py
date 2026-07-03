@@ -9,6 +9,10 @@ class TariffNormalizationError(ValueError):
     """Raised when BKW tariff data cannot be safely normalized."""
 
 
+class TariffPayloadError(TariffNormalizationError):
+    """Raised when BKW tariff data has an unexpected shape."""
+
+
 @dataclass(frozen=True)
 class NormalizedSlot:
     offset: int
@@ -47,8 +51,11 @@ def normalize_unit_value(value: float | int, unit: str) -> float:
 
 def _parse_dt(value: str) -> datetime:
     if not value:
-        raise TariffNormalizationError("Missing timestamp")
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        raise TariffPayloadError("Missing timestamp")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise TariffPayloadError(f"Timestamp has no timezone: {value!r}")
+    return parsed
 
 
 def _current_hour(now: datetime) -> datetime:
@@ -58,9 +65,12 @@ def _current_hour(now: datetime) -> datetime:
 def _extract_feed_in_component(price: dict[str, Any]) -> tuple[float, str]:
     feed_in = price.get("feed_in") or price.get("feedIn") or []
     if not feed_in:
-        raise TariffNormalizationError("Price item has no feed_in component")
+        raise TariffPayloadError("Price item has no feed_in component")
     component = feed_in[0]
-    return component["value"], component["unit"]
+    try:
+        return component["value"], component["unit"]
+    except KeyError as exc:
+        raise TariffPayloadError(f"Price feed_in component misses {exc.args[0]!r}") from exc
 
 
 def normalize_bkw_payload(
@@ -131,5 +141,6 @@ def normalize_bkw_payload(
         "unit": "CHF/kWh",
         "publication_timestamp": payload.get("publication_timestamp") or payload.get("publicationTimestamp"),
         "horizon_hours": len(slots),
+        "min_interval_count": min((slot.interval_count for slot in slots), default=0),
         "relative": [slot.as_dict() for slot in slots],
     }

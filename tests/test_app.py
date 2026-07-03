@@ -19,7 +19,7 @@ def test_health_returns_plain_ok():
     assert response.text == "ok"
 
 
-def test_relative_endpoint_returns_plain_number():
+def test_relative_endpoint_returns_plain_number_when_status_ok():
     set_state(
         TariffState(
             status="ok",
@@ -36,13 +36,30 @@ def test_relative_endpoint_returns_plain_number():
     assert response.text == "0.081000"
 
 
+def test_relative_endpoint_blocks_cached_value_when_status_not_ok():
+    set_state(
+        TariffState(
+            status="api_error",
+            normalized={"relative": [{"offset": 0, "value": 0.081}]},
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            last_error="upstream timeout",
+            last_http_status=None,
+        )
+    )
+
+    response = client.get("/v1/feedin/relative/0")
+
+    assert response.status_code == 503
+    assert "status is api_error" in response.text
+
+
 def test_missing_relative_endpoint_returns_503_not_zero():
     set_state(TariffState(status="no_data", normalized={"relative": []}))
 
     response = client.get("/v1/feedin/relative/0")
 
     assert response.status_code == 503
-    assert "no valid feed-in value" in response.text
+    assert "status is no_data" in response.text
 
 
 def test_status_endpoint_uses_effective_stale_status():
@@ -60,6 +77,23 @@ def test_status_endpoint_uses_effective_stale_status():
     assert client.get("/v1/status-code").text == "2"
 
 
+def test_current_endpoint_blocks_cached_value_when_status_not_ok():
+    set_state(
+        TariffState(
+            status="api_error",
+            normalized={"relative": [{"offset": 0, "value": 0.081}]},
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            last_error="upstream timeout",
+            last_http_status=None,
+        )
+    )
+
+    response = client.get("/v1/feedin/current")
+
+    assert response.status_code == 503
+    assert "status is api_error" in response.text
+
+
 def test_current_and_status_endpoint_is_loxone_friendly():
     set_state(
         TariffState(
@@ -75,6 +109,23 @@ def test_current_and_status_endpoint_is_loxone_friendly():
 
     assert response.status_code == 200
     assert response.text == "0;0.081000"
+
+
+def test_current_and_status_blocks_cached_value_when_status_not_ok():
+    set_state(
+        TariffState(
+            status="api_error",
+            normalized={"relative": [{"offset": 0, "value": 0.081}]},
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            last_error="upstream timeout",
+            last_http_status=None,
+        )
+    )
+
+    response = client.get("/v1/feedin/current-and-status")
+
+    assert response.status_code == 503
+    assert "status is api_error" in response.text
 
 
 def test_index_exposes_flat_loxone_template_fields():
@@ -110,3 +161,33 @@ def test_index_exposes_flat_loxone_template_fields():
     assert payload["feedin_relative_23_mchf_kwh"] is None
     assert payload["loxone_integer_scale"] == "milli-CHF/kWh; divide by 1000 for CHF/kWh display"
     assert payload["template_hint"] == "Loxone command recognitions should use *_mchf_kwh integer keys to avoid decimal separator parsing issues."
+
+
+def test_index_keeps_status_but_nulls_cached_tariff_values_when_not_ok():
+    set_state(
+        TariffState(
+            status="api_error",
+            normalized={
+                "unit": "CHF/kWh",
+                "horizon_hours": 24,
+                "relative": [
+                    {"offset": 0, "value": 0.081},
+                    {"offset": 1, "value": 0.077},
+                ],
+            },
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            last_error="upstream timeout",
+            last_http_status=None,
+        )
+    )
+
+    response = client.get("/")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["status"] == "api_error"
+    assert payload["status_code"] == 3
+    assert payload["feedin_current"] is None
+    assert payload["feedin_current_mchf_kwh"] is None
+    assert payload["feedin_relative_00"] is None
+    assert payload["feedin_relative_00_mchf_kwh"] is None

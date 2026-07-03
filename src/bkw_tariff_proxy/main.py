@@ -63,9 +63,9 @@ def current() -> str:
 
 @app.get("/v1/feedin/current-and-status", response_class=Response)
 def current_and_status() -> str:
-    value = service.relative_value(0)
+    value = service.safe_relative_value(0)
     if value is None:
-        raise HTTPException(status_code=503, detail="no valid current feed-in value")
+        raise HTTPException(status_code=503, detail=f"status is {service.effective_status()}; no valid current feed-in value")
     return f"{service.status_code()};{value:.6f}"
 
 
@@ -73,9 +73,9 @@ def current_and_status() -> str:
 def relative(offset: int) -> str:
     if offset < 0 or offset > 23:
         raise HTTPException(status_code=404, detail="offset must be 0..23")
-    value = service.relative_value(offset)
+    value = service.safe_relative_value(offset)
     if value is None:
-        raise HTTPException(status_code=503, detail=f"no valid feed-in value for offset {offset}")
+        raise HTTPException(status_code=503, detail=f"status is {service.effective_status()}; no valid feed-in value for offset {offset}")
     return f"{value:.6f}"
 
 
@@ -92,7 +92,7 @@ def value_to_mchf_kwh(value: float | None) -> int | None:
 
 
 def loxone_template_payload() -> dict:
-    current_value = service.relative_value(0)
+    current_value = service.safe_relative_value(0)
     payload = {
         "service": "bkw-tariff-proxy",
         "status": service.effective_status(),
@@ -107,7 +107,7 @@ def loxone_template_payload() -> dict:
         "loxone_relative_endpoints": [f"/v1/feedin/relative/{i}" for i in range(24)],
     }
     for offset in range(24):
-        value = service.relative_value(offset)
+        value = service.safe_relative_value(offset)
         payload[f"feedin_relative_{offset:02d}"] = value
         payload[f"feedin_relative_{offset:02d}_mchf_kwh"] = value_to_mchf_kwh(value)
     return payload

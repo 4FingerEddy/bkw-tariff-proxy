@@ -140,7 +140,7 @@ See:
 docs/bkw-api-observations.md
 ```
 
-Current live state: BKW energy-return endpoint returns HTTP 200 with 96 quarter-hour feed-in intervals. The service computes hourly arithmetic means for Loxone relative slots and reports `partial_horizon` before the current rolling 24-hour horizon is complete.
+Current live state: BKW energy-return endpoint returns HTTP 200 with 96 quarter-hour feed-in intervals. The service computes hourly arithmetic means for Loxone relative slots and reports `partial_horizon` before the current rolling 24-hour horizon is complete or when a live BKW hour has fewer than four quarter-hour intervals.
 
 The old BKW MQTT bridge is retired. Production integration is Docker HTTP proxy -> Loxone Virtual HTTP Input.
 

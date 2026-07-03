@@ -68,7 +68,7 @@ Environment variables:
 - `CACHE_MAX_AGE_SECONDS`: maximum age for cached `ok` data before reporting `stale`. Default: `5400`.
 - `DATA_DIR`: cache directory inside the container. Default: `/data`.
 - `TZ`: timezone used by the container. Default: `Europe/Zurich`.
-- `REQUIRE_FULL_HORIZON`: when true, report `partial_horizon` unless 24 hourly slots are available. Default: `true`.
+- `REQUIRE_FULL_HORIZON`: when true, report `partial_horizon` unless 24 hourly slots are available and live BKW quarter-hour data has all 4 intervals per hour. Default: `true`.
 - `BKW_TEST_DATA_MODE`: set to `synthetic` only for lab/Loxone wiring tests. Production should use `off` or omit the variable.
 
 ## Endpoints
@@ -78,10 +78,10 @@ Environment variables:
 - `GET /v1/loxone.json` → same flat Loxone JSON payload
 - `GET /v1/status` → text status
 - `GET /v1/status-code` → numeric status for Loxone logic
-- `GET /v1/feedin/current` → current `+0` value in `CHF/kWh`, or HTTP 503 if unavailable
-- `GET /v1/feedin/current-and-status` → `status_code;value`, for example `0;0.081000`
-- `GET /v1/feedin/relative/{offset}` → `CHF/kWh` value for offset `0 ... 23`, or HTTP 503 if unavailable
-- `GET /v1/feedin/relative.json` → normalized debug JSON
+- `GET /v1/feedin/current` → current `+0` value in `CHF/kWh`, or HTTP 503 if unavailable or status is not `ok`
+- `GET /v1/feedin/current-and-status` → `status_code;value`, for example `0;0.081000`; HTTP 503 unless status is `ok`
+- `GET /v1/feedin/relative/{offset}` → `CHF/kWh` value for offset `0 ... 23`, or HTTP 503 if unavailable or status is not `ok`
+- `GET /v1/feedin/relative.json` → normalized debug JSON; may include cached values even when status is degraded
 
 ## Loxone JSON fields
 
@@ -129,8 +129,8 @@ factor for CHF/kWh display = 0.001
 Recommended Loxone guard:
 
 ```text
-status_code == 0 -> optimizer may use values
-status_code != 0 -> block/neutralize optimization
+status_code == 0 -> optimizer may use values; tariff fields are populated
+status_code != 0 -> block/neutralize optimization; flat Loxone tariff fields are intentionally null
 ```
 
 ## Local development
