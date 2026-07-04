@@ -11,10 +11,15 @@ class Settings:
         "https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn",
     )
     poll_interval_seconds: int = int(os.getenv("POLL_INTERVAL_SECONDS", "900"))
-    cache_max_age_seconds: int = int(os.getenv("CACHE_MAX_AGE_SECONDS", "5400"))
+    upstream_warn_age_seconds: int = int(
+        os.getenv("UPSTREAM_WARN_AGE_SECONDS", os.getenv("CACHE_MAX_AGE_SECONDS", "7200"))
+    )
+    # Kept only for older tests/scripts that instantiate Settings directly.
+    # It no longer invalidates same-day tariff vectors.
+    cache_max_age_seconds: int = int(os.getenv("CACHE_MAX_AGE_SECONDS", "7200"))
     data_dir: str = os.getenv("DATA_DIR", "/data")
     timezone: str = os.getenv("TZ", "Europe/Zurich")
-    require_full_horizon: bool = os.getenv("REQUIRE_FULL_HORIZON", "true").lower() in {
+    require_complete_day: bool = os.getenv("REQUIRE_COMPLETE_DAY", os.getenv("REQUIRE_FULL_HORIZON", "true")).lower() in {
         "1",
         "true",
         "yes",

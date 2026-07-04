@@ -2,14 +2,15 @@
 
 HTTP proxy for BKW dynamic feed-in tariffs and Loxone virtual HTTP inputs.
 
-The service polls BKW's dynamic feed-in tariff endpoint, caches the result locally, normalizes quarter-hour values into Loxone-friendly hourly relative slots, and exposes simple HTTP endpoints for Loxone command recognitions.
+The service polls BKW's dynamic feed-in tariff endpoint, stores the received Swiss local tariff day, normalizes quarter-hour `feed_in` values into absolute hourly day values, and exposes Loxone-friendly HTTP endpoints.
 
 ## Features
 
 - FastAPI HTTP service packaged as a Docker container.
-- Local cache under `/data` so short upstream outages do not immediately break reads.
-- BKW `feed_in` values normalized to `CHF/kWh`.
-- Hourly relative slots `+0 ... +23` computed as the arithmetic mean of available quarter-hour values inside each hour.
+- Local persistent day store under `/data` so same-day tariffs survive upstream outages and container restarts.
+- BKW `feed_in` values normalized to `CHF/kWh` and **not inverted**.
+- Absolute local day slots `h00 ... h23` for the Loxone Spotpreis-Optimierer in **Absolut** mode.
+- Diagnostic rolling relative endpoints only for operators.
 - Integer `mCHF/kWh` fields for Loxone, avoiding decimal separator parsing issues.
 - Numeric status code for simple Loxone guard logic.
 - Non-root container user and Docker healthcheck.
@@ -31,7 +32,7 @@ docker run -d \
   --restart unless-stopped \
   -p 8785:8785 \
   -v bkw-tariff-proxy-data:/data \
-  ghcr.io/4fingereddy/bkw-tariff-proxy:0.1.0
+  ghcr.io/4fingereddy/bkw-tariff-proxy:0.2.0
 ```
 
 ## Docker Compose
@@ -39,7 +40,7 @@ docker run -d \
 ```yaml
 services:
   bkw-tariff-proxy:
-    image: ghcr.io/4fingereddy/bkw-tariff-proxy:0.1.0
+    image: ghcr.io/4fingereddy/bkw-tariff-proxy:0.2.0
     container_name: bkw-tariff-proxy
     restart: unless-stopped
     ports:
@@ -49,8 +50,8 @@ services:
       DATA_DIR: /data
       BKW_ENDPOINT: https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn
       POLL_INTERVAL_SECONDS: "900"
-      CACHE_MAX_AGE_SECONDS: "5400"
-      REQUIRE_FULL_HORIZON: "true"
+      UPSTREAM_WARN_AGE_SECONDS: "7200"
+      REQUIRE_COMPLETE_DAY: "true"
       BKW_TEST_DATA_MODE: "off"
     volumes:
       - bkw-tariff-proxy-data:/data
@@ -65,11 +66,13 @@ Environment variables:
 
 - `BKW_ENDPOINT`: BKW tariff endpoint. Default: `https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn`.
 - `POLL_INTERVAL_SECONDS`: background polling interval. Default: `900`.
-- `CACHE_MAX_AGE_SECONDS`: maximum age for cached `ok` data before reporting `stale`. Default: `5400`.
+- `UPSTREAM_WARN_AGE_SECONDS`: age after which upstream health should be considered old for diagnostics. It does **not** invalidate a valid same-day tariff vector.
 - `DATA_DIR`: cache directory inside the container. Default: `/data`.
-- `TZ`: timezone used by the container. Default: `Europe/Zurich`.
-- `REQUIRE_FULL_HORIZON`: when true, report `partial_horizon` unless 24 hourly slots are available and live BKW quarter-hour data has all 4 intervals per hour. Default: `true`.
+- `TZ`: tariff timezone. Default: `Europe/Zurich`.
+- `REQUIRE_COMPLETE_DAY`: when true, the active tariff day must have all expected quarter-hour intervals. Default: `true`.
 - `BKW_TEST_DATA_MODE`: set to `synthetic` only for lab/Loxone wiring tests. Production should use `off` or omit the variable.
+
+Legacy `CACHE_MAX_AGE_SECONDS` / `REQUIRE_FULL_HORIZON` are still tolerated as environment fallbacks, but the day-vector model no longer treats same-day prices as stale after 90 minutes.
 
 ## Endpoints
 
@@ -78,10 +81,10 @@ Environment variables:
 - `GET /v1/loxone.json` → same flat Loxone JSON payload
 - `GET /v1/status` → text status
 - `GET /v1/status-code` → numeric status for Loxone logic
-- `GET /v1/feedin/current` → current `+0` value in `CHF/kWh`, or HTTP 503 if unavailable or status is not `ok`
+- `GET /v1/feedin/current` → current local-hour value in `CHF/kWh`, or HTTP 503 if unavailable or status is not `ok`
 - `GET /v1/feedin/current-and-status` → `status_code;value`, for example `0;0.081000`; HTTP 503 unless status is `ok`
-- `GET /v1/feedin/relative/{offset}` → `CHF/kWh` value for offset `0 ... 23`, or HTTP 503 if unavailable or status is not `ok`
-- `GET /v1/feedin/relative.json` → diagnostic relative JSON. `status` / `status_code` are the effective safety status used by Loxone; `source_status` and `normalized_status` show the latest cached/upstream payload state. `safe_values_available=false` means listed diagnostic values must not be used for EMS optimization.
+- `GET /v1/feedin/relative/{offset}` → diagnostic rolling `CHF/kWh` value for offset `0 ... 23`, or HTTP 503 if unavailable or status is not `ok`
+- `GET /v1/feedin/relative.json` → diagnostic relative JSON. Do not wire this into the Spotpreis-Optimierer.
 
 ## Loxone JSON fields
 
@@ -92,21 +95,25 @@ status
 status_code
 updated_at
 unit
-horizon_hours
+tariff_date
+day_today_status
+day_tomorrow_status
+upstream_status
+upstream_age_seconds
 feedin_current
 feedin_current_mchf_kwh
-feedin_relative_00 ... feedin_relative_23
-feedin_relative_00_mchf_kwh ... feedin_relative_23_mchf_kwh
+feedin_h00 ... feedin_h23
+feedin_h00_mchf_kwh ... feedin_h23_mchf_kwh
 ```
 
-For Loxone command recognitions, prefer the integer fields:
+For Loxone command recognitions, use the integer fields:
 
 ```text
 status-code -> \i"status_code":\i\v
 current     -> \i"feedin_current_mchf_kwh":\i\v
-+0          -> \i"feedin_relative_00_mchf_kwh":\i\v
-+1          -> \i"feedin_relative_01_mchf_kwh":\i\v
-+23         -> \i"feedin_relative_23_mchf_kwh":\i\v
+h00         -> \i"feedin_h00_mchf_kwh":\i\v
+h01         -> \i"feedin_h01_mchf_kwh":\i\v
+h23         -> \i"feedin_h23_mchf_kwh":\i\v
 ```
 
 Scale:
@@ -118,11 +125,11 @@ factor for CHF/kWh display = 0.001
 
 ## Status codes
 
-- `0`: OK — data valid and full horizon available.
-- `1`: No data — BKW returned no usable tariff data.
-- `2`: Stale — last valid data is too old.
-- `3`: API error — upstream request or processing failed.
-- `4`: Partial horizon — data exists, but fewer than 24 hourly slots are available.
+- `0`: OK — complete, validated dataset for today's local tariff date is active.
+- `1`: No data — no dataset for today's local tariff date.
+- `2`: Stale — defensive guard for wrong-day active data.
+- `3`: API error — upstream request or processing failed and no valid today dataset is available.
+- `4`: Partial horizon — today's dataset exists, but expected intervals/hours are incomplete.
 - `5`: Unknown unit — upstream unit is not safely understood.
 - `99`: Unknown internal state.
 
@@ -132,6 +139,18 @@ Recommended Loxone guard:
 status_code == 0 -> optimizer may use values; tariff fields are populated
 status_code != 0 -> block/neutralize optimization; flat Loxone tariff fields are intentionally null
 ```
+
+## Loxone target model
+
+Use one parent virtual HTTP input `BKW Dyntariffs` on `/v1/loxone.json` or `/`, and wire the 24 values into the Spotpreis-Optimierer in **Absolut** mode:
+
+```text
+BKW h00 -> feedin_h00_mchf_kwh
+...
+BKW h23 -> feedin_h23_mchf_kwh
+```
+
+Do not configure the Spotpreis-Optimierer for relative +0...+23 mode for this BKW integration.
 
 ## Local development
 

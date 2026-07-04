@@ -1,11 +1,31 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from bkw_tariff_proxy.normalizer import (
     TariffNormalizationError,
-    normalize_unit_value,
     normalize_bkw_payload,
+    normalize_unit_value,
 )
+
+TZ = ZoneInfo("Europe/Zurich")
+
+
+def make_day_payload(day: str, *, missing: int = 0, unit: str = "CHF_kWh", base_value: float = 0.0):
+    start = datetime.fromisoformat(day).replace(tzinfo=TZ)
+    prices = []
+    for index in range(96 - missing):
+        interval_start = start + timedelta(minutes=15 * index)
+        hour = interval_start.hour
+        value = round(base_value + hour / 1000, 6)
+        prices.append(
+            {
+                "start_timestamp": interval_start.astimezone(ZoneInfo("UTC")).isoformat(),
+                "end_timestamp": (interval_start + timedelta(minutes=15)).astimezone(ZoneInfo("UTC")).isoformat(),
+                "feed_in": [{"unit": unit, "value": value}],
+            }
+        )
+    return {"publication_timestamp": f"{day}T12:00:00Z", "prices": prices}
 
 
 class UnitNormalizationTests(unittest.TestCase):
@@ -19,90 +39,63 @@ class UnitNormalizationTests(unittest.TestCase):
         with self.assertRaises(TariffNormalizationError):
             normalize_unit_value(81, "mystery")
 
-
-class BkwPayloadNormalizationTests(unittest.TestCase):
-    def test_extracts_feed_in_prices_and_relative_slots(self):
-        payload = {
-            "publication_timestamp": "2026-07-01T13:00:00+02:00",
-            "prices": [
-                {
-                    "start_timestamp": "2026-07-01T14:00:00+02:00",
-                    "end_timestamp": "2026-07-01T15:00:00+02:00",
-                    "feed_in": [{"unit": "Rp/kWh", "value": 8.1}],
-                },
-                {
-                    "start_timestamp": "2026-07-01T15:00:00+02:00",
-                    "end_timestamp": "2026-07-01T16:00:00+02:00",
-                    "feed_in": [{"unit": "Rp/kWh", "value": 7.7}],
-                },
-            ],
-        }
-        normalized = normalize_bkw_payload(
-            payload,
-            now=datetime.fromisoformat("2026-07-01T14:05:00+02:00"),
-        )
-        self.assertEqual(normalized["status"], "ok")
-        self.assertEqual(normalized["unit"], "CHF/kWh")
-        self.assertEqual(normalized["publication_timestamp"], "2026-07-01T13:00:00+02:00")
-        self.assertEqual(normalized["relative"][0]["offset"], 0)
-        self.assertEqual(normalized["relative"][0]["value"], 0.081)
-        self.assertEqual(normalized["relative"][1]["offset"], 1)
-        self.assertEqual(normalized["relative"][1]["value"], 0.077)
-
-    def test_groups_quarter_hour_feed_in_prices_to_one_average_hourly_slot(self):
-        payload = {
-            "publication_timestamp": "2026-07-02T15:35:00Z",
-            "prices": [
-                {
-                    "start_timestamp": "2026-07-03T00:00:00+02:00",
-                    "end_timestamp": "2026-07-03T00:15:00+02:00",
-                    "feed_in": [{"unit": "CHF_kWh", "value": 0.092}],
-                },
-                {
-                    "start_timestamp": "2026-07-03T00:15:00+02:00",
-                    "end_timestamp": "2026-07-03T00:30:00+02:00",
-                    "feed_in": [{"unit": "CHF_kWh", "value": 0.087}],
-                },
-                {
-                    "start_timestamp": "2026-07-03T00:30:00+02:00",
-                    "end_timestamp": "2026-07-03T00:45:00+02:00",
-                    "feed_in": [{"unit": "CHF_kWh", "value": 0.095}],
-                },
-                {
-                    "start_timestamp": "2026-07-03T00:45:00+02:00",
-                    "end_timestamp": "2026-07-03T01:00:00+02:00",
-                    "feed_in": [{"unit": "CHF_kWh", "value": 0.089}],
-                },
-                {
-                    "start_timestamp": "2026-07-03T01:00:00+02:00",
-                    "end_timestamp": "2026-07-03T01:15:00+02:00",
-                    "feed_in": [{"unit": "CHF_kWh", "value": 0.101}],
-                },
-            ],
-        }
-        normalized = normalize_bkw_payload(
-            payload,
-            now=datetime.fromisoformat("2026-07-03T00:05:00+02:00"),
-        )
-        self.assertEqual(normalized["status"], "ok")
-        self.assertEqual(normalized["horizon_hours"], 2)
-        self.assertEqual(normalized["relative"][0]["offset"], 0)
-        self.assertEqual(normalized["relative"][0]["value"], 0.09075)
-        self.assertEqual(normalized["relative"][0]["interval_count"], 4)
-        self.assertEqual(normalized["relative"][1]["offset"], 1)
-        self.assertEqual(normalized["relative"][1]["value"], 0.101)
-        self.assertEqual(normalized["relative"][1]["interval_count"], 1)
-
     def test_accepts_bkw_chf_underscore_unit(self):
         self.assertEqual(normalize_unit_value(0.092, "CHF_kWh"), 0.092)
+
+
+class BkwPayloadNormalizationTests(unittest.TestCase):
+    def test_builds_absolute_local_day_vector(self):
+        normalized = normalize_bkw_payload(
+            make_day_payload("2026-07-04"),
+            now=datetime.fromisoformat("2026-07-04T08:30:00+02:00"),
+        )
+
+        self.assertEqual(normalized["status"], "ok")
+        self.assertEqual(normalized["day"]["tariff_date"], "2026-07-04")
+        self.assertEqual(len(normalized["day"]["hours"]), 24)
+        self.assertEqual(normalized["day"]["hours"][0]["value_chf_kwh"], 0.0)
+        self.assertEqual(normalized["day"]["hours"][12]["value_chf_kwh"], 0.012)
+        self.assertEqual(normalized["day"]["hours"][12]["value_mchf_kwh"], 12)
+        self.assertEqual(normalized["day"]["hours"][12]["interval_count"], 4)
+
+    def test_relative_is_diagnostic_rest_of_day_not_productive_status(self):
+        normalized = normalize_bkw_payload(
+            make_day_payload("2026-07-04"),
+            now=datetime.fromisoformat("2026-07-04T08:30:00+02:00"),
+        )
+
+        self.assertEqual(normalized["status"], "ok")
+        self.assertEqual(normalized["horizon_hours"], 16)
+        self.assertEqual(normalized["relative"][0]["offset"], 0)
+        self.assertEqual(normalized["relative"][0]["value"], 0.008)
+
+    def test_marks_partial_when_intervals_are_missing(self):
+        normalized = normalize_bkw_payload(
+            make_day_payload("2026-07-04", missing=1),
+            now=datetime.fromisoformat("2026-07-04T08:30:00+02:00"),
+        )
+
+        self.assertEqual(normalized["status"], "partial_horizon")
+        self.assertEqual(normalized["day"]["received_intervals"], 95)
+        self.assertEqual(normalized["day"]["hours"][23]["interval_count"], 3)
+
+    def test_preserves_negative_values_and_integer_scale(self):
+        normalized = normalize_bkw_payload(
+            make_day_payload("2026-07-04", base_value=-0.011),
+            now=datetime.fromisoformat("2026-07-04T08:30:00+02:00"),
+        )
+
+        self.assertEqual(normalized["day"]["hours"][0]["value_chf_kwh"], -0.011)
+        self.assertEqual(normalized["day"]["hours"][0]["value_mchf_kwh"], -11)
 
     def test_marks_no_data_when_price_list_is_empty(self):
         normalized = normalize_bkw_payload(
             {"publication_timestamp": None, "prices": []},
-            now=datetime.now(timezone.utc),
+            now=datetime.fromisoformat("2026-07-04T08:30:00+02:00"),
         )
         self.assertEqual(normalized["status"], "no_data")
         self.assertEqual(normalized["relative"], [])
+        self.assertIsNone(normalized["day"])
 
 
 if __name__ == "__main__":

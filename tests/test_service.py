@@ -1,12 +1,15 @@
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 
 from bkw_tariff_proxy.config import Settings
 from bkw_tariff_proxy.service import TariffService
+
+TZ = ZoneInfo("Europe/Zurich")
 
 
 class FakeAsyncClient:
@@ -42,37 +45,45 @@ def make_settings(tmp_path, **overrides):
         "bkw_endpoint": "https://example.invalid/tariffs",
         "poll_interval_seconds": 900,
         "cache_max_age_seconds": 60,
+        "upstream_warn_age_seconds": 7200,
         "data_dir": str(tmp_path),
         "timezone": "Europe/Zurich",
-        "require_full_horizon": False,
+        "require_complete_day": True,
     }
     defaults.update(overrides)
     return Settings(**defaults)
 
 
-def make_quarter_hour_payload(now: datetime, *, hours: int = 24, missing_last_quarters: int = 0, publication_timestamp: str | None = None):
-    base = now.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+def make_service(tmp_path, now: datetime, **settings_overrides):
+    return TariffService(make_settings(tmp_path, **settings_overrides), now_provider=lambda: now)
+
+
+def make_day_payload(day: str, *, missing: int = 0, value_base: float = 0.04, unit: str = "CHF_kWh"):
+    start = datetime.fromisoformat(day).replace(tzinfo=TZ)
     prices = []
-    total_intervals = hours * 4 - missing_last_quarters
-    for index in range(total_intervals):
-        start = base + timedelta(minutes=15 * index)
+    for index in range(96 - missing):
+        interval_start = start + timedelta(minutes=15 * index)
+        hour = interval_start.hour
+        value = round(value_base + hour / 1000, 6)
         prices.append(
             {
-                "start_timestamp": start.isoformat(),
-                "end_timestamp": (start + timedelta(minutes=15)).isoformat(),
-                "feed_in": [{"unit": "CHF_kWh", "value": 0.08 + (index % 4) / 1000}],
+                "start_timestamp": interval_start.astimezone(ZoneInfo("UTC")).isoformat(),
+                "end_timestamp": (interval_start + timedelta(minutes=15)).astimezone(ZoneInfo("UTC")).isoformat(),
+                "feed_in": [{"unit": unit, "value": value}],
             }
         )
-    return {
-        "publication_timestamp": publication_timestamp or now.astimezone(timezone.utc).isoformat(),
-        "prices": prices,
-    }
+    return {"publication_timestamp": f"{day}T12:00:00Z", "prices": prices}
+
+
+def patch_response(monkeypatch, payload, status_code=200):
+    response = httpx.Response(status_code, json=payload, request=httpx.Request("GET", "https://example.invalid/tariffs"))
+    monkeypatch.setattr("bkw_tariff_proxy.service.httpx.AsyncClient", lambda **kwargs: FakeAsyncClient(response))
 
 
 def test_bkw_404_is_no_data_and_persisted(tmp_path, monkeypatch):
     response = httpx.Response(404, request=httpx.Request("GET", "https://example.invalid/tariffs"))
     monkeypatch.setattr("bkw_tariff_proxy.service.httpx.AsyncClient", lambda **kwargs: FakeAsyncClient(response))
-    service = TariffService(make_settings(tmp_path))
+    service = make_service(tmp_path, datetime.fromisoformat("2026-07-04T08:00:00+02:00"))
 
     state = asyncio.run(service.refresh_once())
 
@@ -83,119 +94,132 @@ def test_bkw_404_is_no_data_and_persisted(tmp_path, monkeypatch):
     assert cache["status"] == "no_data"
 
 
-def test_loaded_cache_older_than_max_age_is_reported_stale(tmp_path):
-    old_update = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-    Path(tmp_path, "cache.json").write_text(
-        json.dumps(
-            {
-                "status": "ok",
-                "normalized": {"status": "ok", "relative": [{"offset": 0, "value": 0.081}]},
-                "updated_at": old_update,
-                "last_error": None,
-                "last_http_status": 200,
-            }
-        )
-    )
+def test_complete_today_dataset_is_ok_all_day(tmp_path, monkeypatch):
+    now = datetime.fromisoformat("2026-07-04T08:05:00+02:00")
+    patch_response(monkeypatch, make_day_payload("2026-07-04"))
+    service = make_service(tmp_path, now)
 
-    service = TariffService(make_settings(tmp_path, cache_max_age_seconds=60))
+    state = asyncio.run(service.refresh_once())
 
-    assert service.effective_status() == "stale"
-    assert service.status_code() == 2
+    assert state.status == "ok"
+    assert service.status_code() == 0
+    assert service.safe_day_hour_value(0) == 0.04
+    assert service.safe_day_hour_value(23) == 0.063
+    assert service.safe_current_value() == 0.048
+    assert state.normalized["day_today_status"] == "ok"
+    assert state.normalized["horizon_hours"] == 16
 
 
-def test_publication_timestamp_can_be_older_than_fetch_without_forcing_stale(tmp_path):
-    now = datetime.now(timezone.utc)
-    service = TariffService(make_settings(tmp_path, cache_max_age_seconds=60))
-    service.state.status = "ok"
-    service.state.updated_at = now.isoformat()
-    service.state.normalized = {
-        "status": "ok",
-        "publication_timestamp": (now - timedelta(hours=12)).isoformat(),
-        "relative": [{"offset": 0, "value": 0.081}],
-    }
+def test_cache_age_does_not_make_valid_today_stale(tmp_path, monkeypatch):
+    morning = datetime.fromisoformat("2026-07-04T08:05:00+02:00")
+    patch_response(monkeypatch, make_day_payload("2026-07-04"))
+    service = make_service(tmp_path, morning, cache_max_age_seconds=1)
+    asyncio.run(service.refresh_once())
+
+    service.now_provider = lambda: datetime.fromisoformat("2026-07-04T18:05:00+02:00")
 
     assert service.effective_status() == "ok"
     assert service.status_code() == 0
+    assert service.safe_current_value() == 0.058
 
 
-def test_relative_value_returns_none_for_missing_offset(tmp_path):
-    service = TariffService(make_settings(tmp_path))
-    service.state.normalized = {"relative": [{"offset": 1, "value": 0.077}]}
+def test_tomorrow_payload_keeps_existing_today_active_until_midnight(tmp_path, monkeypatch):
+    service = make_service(tmp_path, datetime.fromisoformat("2026-07-04T08:05:00+02:00"))
+    patch_response(monkeypatch, make_day_payload("2026-07-04", value_base=0.04))
+    asyncio.run(service.refresh_once())
 
-    assert service.relative_value(0) is None
-    assert service.relative_value(1) == 0.077
+    service.now_provider = lambda: datetime.fromisoformat("2026-07-04T17:05:00+02:00")
+    patch_response(monkeypatch, make_day_payload("2026-07-05", value_base=0.08))
+    state = asyncio.run(service.refresh_once())
 
-
-def test_safe_relative_value_requires_effective_ok_status(tmp_path):
-    service = TariffService(make_settings(tmp_path))
-    service.state.status = "api_error"
-    service.state.normalized = {"relative": [{"offset": 0, "value": 0.081}]}
-
-    assert service.relative_value(0) == 0.081
-    assert service.safe_relative_value(0) is None
+    assert state.status == "ok"
+    assert service.current_day()["tariff_date"] == "2026-07-04"
+    assert service.tomorrow_day()["tariff_date"] == "2026-07-05"
+    assert service.safe_current_value() == 0.057
 
 
-def test_synthetic_test_mode_returns_full_loxone_horizon_without_http(tmp_path, monkeypatch):
+def test_midnight_rollover_uses_stored_tomorrow_without_poll(tmp_path, monkeypatch):
+    service = make_service(tmp_path, datetime.fromisoformat("2026-07-04T17:05:00+02:00"))
+    patch_response(monkeypatch, make_day_payload("2026-07-04", value_base=0.04))
+    asyncio.run(service.refresh_once())
+    patch_response(monkeypatch, make_day_payload("2026-07-05", value_base=0.08))
+    asyncio.run(service.refresh_once())
+
+    service.now_provider = lambda: datetime.fromisoformat("2026-07-05T00:05:00+02:00")
+
+    assert service.effective_status() == "ok"
+    assert service.current_day()["tariff_date"] == "2026-07-05"
+    assert service.safe_current_value() == 0.08
+
+
+def test_missing_tomorrow_at_midnight_blocks_no_data(tmp_path, monkeypatch):
+    service = make_service(tmp_path, datetime.fromisoformat("2026-07-04T17:05:00+02:00"))
+    patch_response(monkeypatch, make_day_payload("2026-07-04"))
+    asyncio.run(service.refresh_once())
+
+    service.now_provider = lambda: datetime.fromisoformat("2026-07-05T00:05:00+02:00")
+
+    assert service.effective_status() == "no_data"
+    assert service.status_code() == 1
+    assert service.safe_current_value() is None
+
+
+def test_partial_today_dataset_blocks_values(tmp_path, monkeypatch):
+    patch_response(monkeypatch, make_day_payload("2026-07-04", missing=1))
+    service = make_service(tmp_path, datetime.fromisoformat("2026-07-04T08:05:00+02:00"))
+
+    state = asyncio.run(service.refresh_once())
+
+    assert state.status == "partial_horizon"
+    assert service.status_code() == 4
+    assert service.safe_current_value() is None
+    assert service.day_hour_value(8) == 0.048
+
+
+def test_api_error_after_valid_today_keeps_today_ok_until_midnight(tmp_path, monkeypatch):
+    service = make_service(tmp_path, datetime.fromisoformat("2026-07-04T08:05:00+02:00"))
+    patch_response(monkeypatch, make_day_payload("2026-07-04"))
+    asyncio.run(service.refresh_once())
+
+    monkeypatch.setattr(
+        "bkw_tariff_proxy.service.httpx.AsyncClient",
+        lambda **kwargs: RaisingAsyncClient(httpx.ConnectError("boom")),
+    )
+    service.now_provider = lambda: datetime.fromisoformat("2026-07-04T18:05:00+02:00")
+    state = asyncio.run(service.refresh_once())
+
+    assert state.status == "ok"
+    assert state.last_error == "boom"
+    assert service.status_code() == 0
+    assert service.safe_current_value() == 0.058
+
+
+def test_unknown_unit_blocks(tmp_path, monkeypatch):
+    patch_response(monkeypatch, make_day_payload("2026-07-04", unit="mystery"))
+    service = make_service(tmp_path, datetime.fromisoformat("2026-07-04T08:05:00+02:00"))
+
+    state = asyncio.run(service.refresh_once())
+
+    assert state.status == "unit_unknown"
+    assert service.status_code() == 5
+    assert service.safe_current_value() is None
+
+
+def test_synthetic_test_mode_returns_complete_day_without_http(tmp_path, monkeypatch):
     class FailingClient:
         def __init__(self, **kwargs):
             raise AssertionError("synthetic test mode must not call BKW HTTP endpoint")
 
     monkeypatch.setattr("bkw_tariff_proxy.service.httpx.AsyncClient", FailingClient)
-    service = TariffService(make_settings(tmp_path, test_data_mode="synthetic", require_full_horizon=True))
+    service = make_service(tmp_path, datetime.fromisoformat("2026-07-04T08:05:00+02:00"), test_data_mode="synthetic")
 
     state = asyncio.run(service.refresh_once())
 
     assert state.status == "ok"
     assert state.last_http_status is None
     assert state.last_error is None
-    assert state.normalized["horizon_hours"] == 24
-    assert [slot["offset"] for slot in state.normalized["relative"]] == list(range(24))
+    assert service.current_day()["tariff_date"] == "2026-07-04"
+    assert len(service.current_day()["hours"]) == 24
     assert service.status_code() == 0
-    assert service.relative_value(0) is not None
     cache = json.loads(Path(tmp_path, "cache.json").read_text())
     assert cache["status"] == "ok"
-
-
-def test_live_full_horizon_requires_complete_quarter_hours(tmp_path, monkeypatch):
-    now = datetime.now(timezone.utc).replace(minute=5, second=0, microsecond=0)
-    payload = make_quarter_hour_payload(now, hours=24, missing_last_quarters=3)
-    response = httpx.Response(200, json=payload, request=httpx.Request("GET", "https://example.invalid/tariffs"))
-    monkeypatch.setattr("bkw_tariff_proxy.service.httpx.AsyncClient", lambda **kwargs: FakeAsyncClient(response))
-    service = TariffService(make_settings(tmp_path, require_full_horizon=True))
-
-    state = asyncio.run(service.refresh_once())
-
-    assert state.status == "partial_horizon"
-    assert service.status_code() == 4
-    assert state.normalized["horizon_hours"] == 24
-    assert state.normalized["min_interval_count"] == 1
-
-
-def test_live_complete_quarter_hour_horizon_is_ok(tmp_path, monkeypatch):
-    now = datetime.now(timezone.utc)
-    payload = make_quarter_hour_payload(now, hours=24)
-    response = httpx.Response(200, json=payload, request=httpx.Request("GET", "https://example.invalid/tariffs"))
-    monkeypatch.setattr("bkw_tariff_proxy.service.httpx.AsyncClient", lambda **kwargs: FakeAsyncClient(response))
-    service = TariffService(make_settings(tmp_path, require_full_horizon=True))
-
-    state = asyncio.run(service.refresh_once())
-
-    assert state.status == "ok"
-    assert service.status_code() == 0
-    assert state.normalized["horizon_hours"] == 24
-    assert state.normalized["min_interval_count"] == 4
-
-
-def test_api_error_preserves_cache_but_safe_value_blocks(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "bkw_tariff_proxy.service.httpx.AsyncClient",
-        lambda **kwargs: RaisingAsyncClient(httpx.ConnectError("boom")),
-    )
-    service = TariffService(make_settings(tmp_path))
-    service.state.normalized = {"relative": [{"offset": 0, "value": 0.081}]}
-
-    state = asyncio.run(service.refresh_once())
-
-    assert state.status == "api_error"
-    assert service.relative_value(0) == 0.081
-    assert service.safe_relative_value(0) is None

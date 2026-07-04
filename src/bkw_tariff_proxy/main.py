@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Response
 
 from .config import Settings
+from .normalizer import value_to_mchf_kwh
 from .service import TariffService
 
 settings = Settings()
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="BKW Tariff Proxy", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="BKW Tariff Proxy", version="0.2.0", lifespan=lifespan)
 
 
 @app.get("/health", response_class=Response)
@@ -48,25 +49,26 @@ def status_code() -> str:
 
 @app.get("/v1/feedin/relative.json")
 def relative_json() -> dict:
-    """Return diagnostic relative tariff data with unambiguous status fields.
+    """Return diagnostic rolling tariff data.
 
-    ``service.state.normalized`` carries the source/normalizer status from the
-    latest BKW payload. The operational status used by Loxone may be stricter
-    because it also includes freshness and full-horizon safety gates. Expose
-    both explicitly so operators can distinguish "BKW payload was parseable"
-    from "safe to use for EMS optimization".
+    Productive Loxone values live in `/v1/loxone.json` as absolute local day
+    fields `feedin_h00...feedin_h23`. This endpoint is diagnostic only.
     """
+
     effective_status = service.effective_status()
+    upstream_age = service.upstream_age_seconds()
     payload = {
         **service.state.normalized,
         "source_status": service.state.status,
-        "normalized_status": service.state.normalized.get("status", service.state.status),
         "effective_status": effective_status,
         "effective_status_code": service.status_code(),
         "status": effective_status,
         "status_code": service.status_code(),
         "safe_values_available": effective_status == "ok",
+        "diagnostic_only": True,
         "updated_at": service.state.updated_at,
+        "upstream_status": "ok" if service.state.last_error is None else "error",
+        "upstream_age_seconds": upstream_age,
         "last_error": service.state.last_error,
         "last_http_status": service.state.last_http_status,
     }
@@ -75,12 +77,15 @@ def relative_json() -> dict:
 
 @app.get("/v1/feedin/current", response_class=Response)
 def current() -> str:
-    return relative(0)
+    value = service.safe_current_value()
+    if value is None:
+        raise HTTPException(status_code=503, detail=f"status is {service.effective_status()}; no valid current feed-in value")
+    return f"{value:.6f}"
 
 
 @app.get("/v1/feedin/current-and-status", response_class=Response)
 def current_and_status() -> str:
-    value = service.safe_relative_value(0)
+    value = service.safe_current_value()
     if value is None:
         raise HTTPException(status_code=503, detail=f"status is {service.effective_status()}; no valid current feed-in value")
     return f"{service.status_code()};{value:.6f}"
@@ -96,37 +101,31 @@ def relative(offset: int) -> str:
     return f"{value:.6f}"
 
 
-def value_to_mchf_kwh(value: float | None) -> int | None:
-    """Convert CHF/kWh float values to milli-CHF/kWh integers for Loxone.
-
-    Loxone command recognition may mark JSON decimal values but parse only the
-    integer part when the payload uses a dot as decimal separator. Integer
-    milli-CHF/kWh values avoid locale/decimal separator ambiguity.
-    """
-    if value is None:
-        return None
-    return int(round(value * 1000))
-
-
 def loxone_template_payload() -> dict:
-    current_value = service.safe_relative_value(0)
+    effective_status = service.effective_status()
+    current_value = service.safe_current_value()
+    today = service.current_day()
+    upstream_age = service.upstream_age_seconds()
     payload = {
         "service": "bkw-tariff-proxy",
-        "status": service.effective_status(),
+        "status": effective_status,
         "status_code": service.status_code(),
         "updated_at": service.state.updated_at,
         "unit": service.state.normalized.get("unit", "CHF/kWh"),
-        "horizon_hours": service.state.normalized.get("horizon_hours", 0),
+        "tariff_date": today.get("tariff_date") if today else None,
+        "day_today_status": service.state.normalized.get("day_today_status"),
+        "day_tomorrow_status": service.state.normalized.get("day_tomorrow_status"),
+        "upstream_status": "ok" if service.state.last_error is None else "error",
+        "upstream_age_seconds": upstream_age,
         "feedin_current": current_value,
         "feedin_current_mchf_kwh": value_to_mchf_kwh(current_value),
         "loxone_integer_scale": "milli-CHF/kWh; divide by 1000 for CHF/kWh display",
-        "template_hint": "Loxone command recognitions should use *_mchf_kwh integer keys to avoid decimal separator parsing issues.",
-        "loxone_relative_endpoints": [f"/v1/feedin/relative/{i}" for i in range(24)],
+        "template_hint": "Use feedin_h00_mchf_kwh..feedin_h23_mchf_kwh with Spotpreis-Optimierer in Absolut mode.",
     }
-    for offset in range(24):
-        value = service.safe_relative_value(offset)
-        payload[f"feedin_relative_{offset:02d}"] = value
-        payload[f"feedin_relative_{offset:02d}_mchf_kwh"] = value_to_mchf_kwh(value)
+    for hour in range(24):
+        value = service.safe_day_hour_value(hour)
+        payload[f"feedin_h{hour:02d}"] = value
+        payload[f"feedin_h{hour:02d}_mchf_kwh"] = value_to_mchf_kwh(value)
     return payload
 
 

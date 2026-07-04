@@ -2,8 +2,8 @@ project: bkw-tariff-proxy
 owner: Patrick / Rootkeeper
 storage: /mnt/synology-rootkeeper/projects/bkw-tariff-proxy
 created_at: "2026-06-20T21:34:00+02:00"
-updated_at: "2026-07-02T20:50:00+02:00"
-status: released-ghcr-portainer-cutover-blocked-by-package-visibility
+updated_at: "2026-07-04T17:14:00+02:00"
+status: day-vector-portainer-deployed-ghcr-cutover-blocked-by-package-visibility
 secrets: none-in-project
 git:
   branch: main
@@ -51,7 +51,7 @@ portainer_deployment:
     BKW_TEST_DATA_MODE: "off"
     REQUIRE_FULL_HORIZON: "true"
     POLL_INTERVAL_SECONDS: "900"
-  latest_cutover_audit: /mnt/synology-rootkeeper/reports/bkw-tariff-proxy/live-cutover/20260702_174315
+  latest_cutover_audit: /mnt/synology-rootkeeper/reports/bkw-tariff-proxy/live-cutover/20260704_171925
 artifacts:
   readme: README.md
   runbook: RUNBOOK.md
@@ -72,16 +72,16 @@ artifacts:
 verification:
   - command: . /home/rootkeeper/.venvs/bkw-tariff-proxy/bin/activate && pytest -q && python -m py_compile src/bkw_tariff_proxy/*.py
     status: ok
-    result: 17 tests passed, 1 upstream TestClient warning; source files compiled
+    result: 30 tests passed, 1 upstream TestClient warning; source files compiled
   - command: Portainer Docker API build image bkw-tariff-proxy:local
     status: ok
-    result: image rebuilt with BKW CHF_kWh and quarter-hour-to-hour normalization
+    result: image rebuilt with day-vector BKW CHF_kWh quarter-hour-to-hour normalization
   - command: Portainer stack update bkw-tariff-proxy-test with BKW_TEST_DATA_MODE=off
     status: ok
     result: stack updated, container running healthy
   - command: curl http://192.168.5.40:8785/health and /v1 endpoints from Pi
     status: ok
-    result: health ok; live BKW data; status partial_horizon before midnight; status-code 4; relative/23 0.005000; root Loxone JSON exposes integer mchf_kwh fields
+    result: health ok; live BKW tomorrow dataset present; no today dataset after BKW afternoon flip so status no_data/status-code 1; Loxone JSON exposes feedin_h00..h23 integer mchf_kwh fields only and nulls values while non-OK
   - command: Retired BKW MQTT bridge cleanup
     status: ok
     result: MQTT bridge scripts/state/jobs retired; production integration is HTTP proxy -> Loxone
@@ -89,9 +89,9 @@ notes:
   - NAS mount does not support Python venv symlinks; development venv is /home/rootkeeper/.venvs/bkw-tariff-proxy.
   - Current Synology deployment still has the historic '*-test' stack/container name, but now runs live BKW data.
   - Synthetic mode is disabled. Keep it only as explicit lab mode; production/live operation uses BKW_TEST_DATA_MODE=off or no variable.
-  - BKW live payload uses quarter-hour intervals. The proxy groups them into hourly Loxone relative slots using the arithmetic mean feed-in value per hour.
+  - BKW live payload uses quarter-hour intervals. The proxy groups them into absolute local day-hour Loxone slots using the arithmetic mean feed-in value per hour.
   - Average aggregation deployed to Synology/Portainer on 2026-07-02; audit: /mnt/synology-rootkeeper/reports/bkw-tariff-proxy/live-cutover/20260702_194108.
-  - BKW currently publishes next-day values. Before midnight the HTTP proxy may show partial_horizon because +0/current is not yet available; this is safer than fake fallback values.
+  - BKW currently publishes next-day values after the afternoon flip. If no today's day vector is cached, the HTTP proxy shows no_data until local midnight activates the stored tomorrow dataset; this is safer than fake fallback values.
   - Loxone Library/template export can now be finalized against live data once downstream optimizer behavior is confirmed.
   - GHCR release target: ghcr.io/4fingereddy/bkw-tariff-proxy:<version>. v0.1.0 is released with digest sha256:f80b68292d4c1eea0ef0eb8ac8ac29f3bb0dfcf2d68d807bb37a2b748b754d59. Portainer cutover is blocked until GHCR package visibility is public or registry credentials with read:packages are configured.
   - Release audit: /mnt/synology-rootkeeper/reports/bkw-tariff-proxy/releases/20260702_210318.
