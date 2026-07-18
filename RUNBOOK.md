@@ -147,13 +147,14 @@ After deploying the proxy day-vector version:
 1. Configure `BKW Dyntariffs` command recognitions to `feedin_h00_mchf_kwh` ... `feedin_h23_mchf_kwh`.
 2. Configure `BKW Aktuell chf/kWh` to `feedin_current_mchf_kwh`.
 3. Switch `Dynamische Einspeisevergütung` to **Absolut** mode.
-4. Keep the status-code guard: `status_code == 0` unlocks, non-zero locks/neutralizes.
-5. Remove or clearly control the previous override/Überbrückung path. Do not mask `api_error`, `unit_unknown`, or `no_data` as valid optimization data.
+4. Keep the status-code guard: `status_code == 0` uses complete values; `status_code == 10` uses the explicitly single-hour-zero-filled values and displays `missing_hour`; every other code locks/neutralizes.
+5. Never consume `/v1/feedin/current` or `/v1/feedin/relative/{offset}` without the status guard. During the affected hour, code `10` intentionally makes the plain value endpoint return the fabricated `0.000000`; use `/v1/feedin/current-and-status` or `/v1/loxone.json` when the status must travel with the value.
+6. Remove or clearly control the previous override/Überbrückung path. Do not mask `api_error`, `unit_unknown`, or `no_data` as valid optimization data.
 
 ## Safety notes
 
 - Do not expose this service directly to the internet.
 - Do not guess BKW units. Unknown unit must fail as `unit_unknown` or raise a controlled error.
-- Do not feed `0` into Loxone as a silent fallback for missing data.
+- Do not feed `0` into Loxone as a silent fallback. The only tolerated exception is the explicit single-hour policy with status code `10`, `missing_hour`, and 24 validated output fields; that `0` is fabricated, not a measured tariff.
 - Loxone should read status state and block optimization on invalid data.
 - `/data` must be persistent so today's cached day survives container restarts.

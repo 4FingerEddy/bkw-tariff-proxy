@@ -81,8 +81,9 @@ python -m py_compile src/bkw_tariff_proxy/*.py
 6. Confirm Loxone status gating:
 
 ```text
-status_code == 0 -> optimizer allowed
-status_code != 0 -> optimizer blocked / normal mode
+status_code == 0  -> optimizer allowed with complete values
+status_code == 10 -> optimizer allowed with one explicit zero-filled hour; warning/status display required
+all other codes  -> optimizer blocked / normal mode
 ```
 
 7. Agree final name.

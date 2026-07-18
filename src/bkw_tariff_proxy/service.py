@@ -28,6 +28,7 @@ STATUS_CODES = {
     "api_error": 3,
     "partial_horizon": 4,
     "unit_unknown": 5,
+    "single_missing_hour_zero_filled": 10,
 }
 
 logger = logging.getLogger(__name__)
@@ -116,17 +117,70 @@ class TariffService:
     def _day_complete(self, day: dict[str, Any] | None) -> bool:
         if not day:
             return False
-        if day.get("received_intervals") != day.get("expected_intervals"):
+        hours = day.get("hours") or []
+        if len(hours) != 24:
             return False
-        for hour in day.get("hours", []):
-            if hour.get("dst_placeholder"):
-                continue
-            if hour.get("value_chf_kwh") is None:
+        if day.get("duplicate_hours") != [] or day.get("duplicate_interval_count") != 0:
+            return False
+
+        tolerated_zero_fills = day.get("zero_filled_hours") or []
+        if not isinstance(tolerated_zero_fills, list) or len(tolerated_zero_fills) > 1:
+            return False
+        zero_filled_hour = tolerated_zero_fills[0] if tolerated_zero_fills else None
+        if zero_filled_hour is not None and (not isinstance(zero_filled_hour, int) or not 0 <= zero_filled_hour <= 23):
+            return False
+
+        expected_intervals = day.get("expected_intervals")
+        received_intervals = day.get("received_intervals")
+        if not isinstance(expected_intervals, int) or not isinstance(received_intervals, int):
+            return False
+
+        if zero_filled_hour is None:
+            if received_intervals != expected_intervals:
                 return False
-            expected = 8 if day.get("expected_intervals") == 100 and hour.get("hour") == 2 else 4
+        else:
+            if day.get("missing_hours") != [zero_filled_hour] or day.get("missing_hour_count") != 1:
+                return False
+            if day.get("missing_hour") not in {None, zero_filled_hour}:
+                return False
+            if day.get("data_quality_status") != "single_missing_hour_zero_filled":
+                return False
+            expected_for_zero_filled_hour = 8 if expected_intervals == 100 and zero_filled_hour == 2 else 4
+            deficit = expected_intervals - received_intervals
+            if not 1 <= deficit <= expected_for_zero_filled_hour:
+                return False
+
+        for expected_hour, hour in enumerate(hours):
+            if hour.get("hour") != expected_hour:
+                return False
+            if hour.get("dst_placeholder"):
+                if expected_intervals != 92 or expected_hour != 2 or zero_filled_hour == expected_hour:
+                    return False
+                continue
+            if expected_hour == zero_filled_hour:
+                if not hour.get("zero_filled"):
+                    return False
+                if hour.get("value_chf_kwh") != 0.0 or hour.get("value_mchf_kwh") != 0:
+                    return False
+                if hour.get("interval_count") != 0:
+                    return False
+                continue
+            if hour.get("zero_filled") or hour.get("value_chf_kwh") is None:
+                return False
+            expected = 8 if expected_intervals == 100 and expected_hour == 2 else 4
             if hour.get("interval_count") != expected:
                 return False
-        return len(day.get("hours", [])) == 24
+        return True
+
+    def _missing_hour(self, day: dict[str, Any] | None) -> int | None:
+        if not day:
+            return None
+        if day.get("missing_hour") is not None:
+            return day.get("missing_hour")
+        missing_hours = day.get("missing_hours") or []
+        if len(missing_hours) == 1:
+            return int(missing_hours[0])
+        return None
 
     def _merge_day(self, day: dict[str, Any]) -> None:
         days = dict(self.state.normalized.get("days") or {})
@@ -159,6 +213,11 @@ class TariffService:
                 "tomorrow_date": tomorrow_day.get("tariff_date") if tomorrow_day else None,
                 "day_today_status": self._day_status(today_day, expected_date=today),
                 "day_tomorrow_status": self._day_status(tomorrow_day, expected_date=tomorrow, missing_status="pending"),
+                "data_quality_status": today_day.get("data_quality_status") if today_day else None,
+                "missing_hours": today_day.get("missing_hours", []) if today_day else [],
+                "missing_hour": self._missing_hour(today_day),
+                "missing_hour_count": today_day.get("missing_hour_count", 0) if today_day else 0,
+                "zero_filled_hours": today_day.get("zero_filled_hours", []) if today_day else [],
                 "horizon_hours": len(relative),
                 "relative": [slot.as_dict() for slot in relative],
             }
@@ -169,7 +228,11 @@ class TariffService:
             return missing_status
         if day.get("tariff_date") != expected_date:
             return "stale"
-        return "ok" if self._day_complete(day) else "partial_horizon"
+        if not self._day_complete(day):
+            return "partial_horizon"
+        if len(day.get("zero_filled_hours") or []) == 1:
+            return "single_missing_hour_zero_filled"
+        return "ok"
 
     def _derive_status(self, *, fetch_status: str | None = None) -> str:
         days = self.state.normalized.get("days") or {}
@@ -178,6 +241,8 @@ class TariffService:
         today_status = self._day_status(today_day, expected_date=today)
         if today_status == "ok":
             return "ok"
+        if today_status == "single_missing_hour_zero_filled":
+            return "single_missing_hour_zero_filled"
         if today_status == "partial_horizon":
             return "partial_horizon"
         if fetch_status in {"unit_unknown", "api_error"}:
@@ -294,7 +359,7 @@ class TariffService:
         return day["hours"][hour].get("value_chf_kwh")
 
     def safe_day_hour_value(self, hour: int) -> float | None:
-        if self.effective_status() != "ok":
+        if self.effective_status() not in {"ok", "single_missing_hour_zero_filled"}:
             return None
         return self.day_hour_value(hour)
 
@@ -303,7 +368,7 @@ class TariffService:
         return self.day_hour_value(current_hour)
 
     def safe_current_value(self) -> float | None:
-        if self.effective_status() != "ok":
+        if self.effective_status() not in {"ok", "single_missing_hour_zero_filled"}:
             return None
         return self.current_value()
 
@@ -315,6 +380,6 @@ class TariffService:
         return None
 
     def safe_relative_value(self, offset: int) -> float | None:
-        if self.effective_status() != "ok":
+        if self.effective_status() not in {"ok", "single_missing_hour_zero_filled"}:
             return None
         return self.relative_value(offset)

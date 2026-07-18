@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from bkw_tariff_proxy.config import Settings
+from bkw_tariff_proxy.normalizer import normalize_bkw_payload
 from bkw_tariff_proxy.service import TariffService
 
 TZ = ZoneInfo("Europe/Zurich")
@@ -164,16 +165,137 @@ def test_missing_tomorrow_at_midnight_blocks_no_data(tmp_path, monkeypatch):
     assert service.safe_current_value() is None
 
 
-def test_partial_today_dataset_blocks_values(tmp_path, monkeypatch):
+def test_single_bad_hour_is_zero_filled_and_keeps_values_available(tmp_path, monkeypatch):
     patch_response(monkeypatch, make_day_payload("2026-07-04", missing=1))
     service = make_service(tmp_path, datetime.fromisoformat("2026-07-04T08:05:00+02:00"))
 
     state = asyncio.run(service.refresh_once())
 
-    assert state.status == "partial_horizon"
-    assert service.status_code() == 4
-    assert service.safe_current_value() is None
+    assert state.status == "single_missing_hour_zero_filled"
+    assert service.status_code() == 10
+    assert service.safe_current_value() == 0.048
+    current_day = service.current_day()
+    assert current_day is not None
+    assert current_day["missing_hours"] == [23]
+    assert current_day["zero_filled_hours"] == [23]
+    assert service.day_hour_value(23) == 0.0
+    assert service.safe_day_hour_value(23) == 0.0
     assert service.day_hour_value(8) == 0.048
+
+
+def test_duplicate_drop_day_fails_closed_through_effective_status(tmp_path):
+    now = datetime.fromisoformat("2026-07-04T08:05:00+02:00")
+    payload = make_day_payload("2026-07-04")
+    duplicate = dict(payload["prices"][56])
+    duplicate["feed_in"] = [dict(payload["prices"][56]["feed_in"][0])]
+    payload["prices"][57] = duplicate
+    day = normalize_bkw_payload(payload, now=now)["day"]
+    service = make_service(tmp_path, now)
+    service.state.normalized = {"days": {"2026-07-04": day}}
+
+    assert day["duplicate_hours"] == [14]
+    assert service.effective_status() == "partial_horizon"
+    assert service.status_code() == 4
+    assert service.safe_day_hour_value(14) is None
+
+
+def test_cache_without_duplicate_metadata_fails_closed(tmp_path):
+    now = datetime.fromisoformat("2026-07-04T08:05:00+02:00")
+    day = normalize_bkw_payload(make_day_payload("2026-07-04"), now=now)["day"]
+    day.pop("duplicate_hours")
+    day.pop("duplicate_interval_count")
+    service = make_service(tmp_path, now)
+    service.state.normalized = {"days": {"2026-07-04": day}}
+
+    assert service.effective_status() == "partial_horizon"
+    assert service.status_code() == 4
+    assert service.safe_day_hour_value(14) is None
+
+
+def test_inconsistent_cached_zero_fill_fails_closed(tmp_path):
+    now = datetime.fromisoformat("2026-07-04T08:05:00+02:00")
+    service = make_service(tmp_path, now)
+    day = normalize_bkw_payload(make_day_payload("2026-07-04"), now=now)["day"]
+    day["hours"][14] = {
+        "hour": 14,
+        "value_chf_kwh": 0.0,
+        "value_mchf_kwh": 0,
+        "interval_count": 0,
+        "dst_placeholder": False,
+        "zero_filled": True,
+    }
+    day["hours"][15] = {
+        "hour": 15,
+        "value_chf_kwh": None,
+        "value_mchf_kwh": None,
+        "interval_count": 0,
+        "dst_placeholder": False,
+        "zero_filled": False,
+    }
+    day.update(
+        {
+            "received_intervals": 88,
+            "missing_hours": [14, 15],
+            "missing_hour": None,
+            "missing_hour_count": 2,
+            "zero_filled_hours": [14],
+            "data_quality_status": "partial_horizon",
+            "status_code": 4,
+        }
+    )
+    service.state.normalized = {"days": {"2026-07-04": day}}
+
+    assert service.effective_status() == "partial_horizon"
+    assert service.status_code() == 4
+    assert service.safe_day_hour_value(14) is None
+    assert service.safe_day_hour_value(15) is None
+
+
+def test_zero_fill_marker_without_zero_filled_hour_fails_closed(tmp_path):
+    now = datetime.fromisoformat("2026-07-04T08:05:00+02:00")
+    service = make_service(tmp_path, now)
+    day = normalize_bkw_payload(make_day_payload("2026-07-04"), now=now)["day"]
+    day.update(
+        {
+            "missing_hours": [14],
+            "missing_hour": 14,
+            "missing_hour_count": 1,
+            "zero_filled_hours": [14],
+            "data_quality_status": "single_missing_hour_zero_filled",
+            "status_code": 10,
+        }
+    )
+    service.state.normalized = {"days": {"2026-07-04": day}}
+
+    assert service.effective_status() == "partial_horizon"
+    assert service.status_code() == 4
+    assert service.safe_day_hour_value(14) is None
+
+
+def test_zero_filled_hour_with_nonzero_value_fails_closed(tmp_path):
+    now = datetime.fromisoformat("2026-07-04T08:05:00+02:00")
+    service = make_service(tmp_path, now)
+    day = normalize_bkw_payload(make_day_payload("2026-07-04", missing=1), now=now)["day"]
+    day["hours"][23]["value_chf_kwh"] = 0.023
+    day["hours"][23]["value_mchf_kwh"] = 23
+    service.state.normalized = {"days": {"2026-07-04": day}}
+
+    assert service.effective_status() == "partial_horizon"
+    assert service.status_code() == 4
+    assert service.safe_day_hour_value(23) is None
+
+
+def test_conflicting_missing_hour_metadata_fails_closed(tmp_path):
+    now = datetime.fromisoformat("2026-07-04T08:05:00+02:00")
+    service = make_service(tmp_path, now)
+    day = normalize_bkw_payload(make_day_payload("2026-07-04", missing=1), now=now)["day"]
+    assert day["zero_filled_hours"] == [23]
+    day["missing_hour"] = 22
+    service.state.normalized = {"days": {"2026-07-04": day}}
+
+    assert service.effective_status() == "partial_horizon"
+    assert service.status_code() == 4
+    assert service.safe_day_hour_value(23) is None
 
 
 def test_api_error_after_valid_today_keeps_today_ok_until_midnight(tmp_path, monkeypatch):

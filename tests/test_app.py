@@ -21,6 +21,7 @@ def day(day_str: str, *, base: float = 0.04):
                 "value_mchf_kwh": int(round(value * 1000)),
                 "interval_count": 4,
                 "dst_placeholder": False,
+                "zero_filled": False,
             }
         )
     local_start = datetime.fromisoformat(day_str).replace(tzinfo=TZ)
@@ -32,9 +33,33 @@ def day(day_str: str, *, base: float = 0.04):
         "coverage_end_utc": (local_start + timedelta(days=1)).astimezone(ZoneInfo("UTC")).isoformat(),
         "expected_intervals": 96,
         "received_intervals": 96,
+        "missing_hours": [],
+        "missing_hour_count": 0,
+        "zero_filled_hours": [],
+        "duplicate_hours": [],
+        "duplicate_interval_count": 0,
+        "data_quality_status": "ok",
         "content_hash": f"hash-{day_str}",
         "publication_timestamp": f"{day_str}T12:00:00Z",
     }
+
+
+def day_with_zero_filled_hour(day_str: str, hour: int, *, base: float = 0.04):
+    payload = day(day_str, base=base)
+    payload["received_intervals"] = 92
+    payload["missing_hours"] = [hour]
+    payload["missing_hour_count"] = 1
+    payload["zero_filled_hours"] = [hour]
+    payload["data_quality_status"] = "single_missing_hour_zero_filled"
+    payload["hours"][hour] = {
+        "hour": hour,
+        "value_chf_kwh": 0.0,
+        "value_mchf_kwh": 0,
+        "interval_count": 0,
+        "dst_placeholder": False,
+        "zero_filled": True,
+    }
+    return payload
 
 
 def set_state(state: TariffState, now: datetime | None = None):
@@ -151,6 +176,22 @@ def test_current_and_status_endpoint_is_loxone_friendly():
     assert response.text == "0;0.048000"
 
 
+def test_current_and_status_endpoint_exposes_code_10_for_zero_filled_current_hour():
+    now = datetime.fromisoformat("2026-07-04T08:05:00+02:00")
+    today = now.astimezone(TZ).date().isoformat()
+    state = TariffState(
+        status="single_missing_hour_zero_filled",
+        normalized={"days": {today: day_with_zero_filled_hour(today, 8)}},
+    )
+    set_state(state, now)
+
+    assert client.get("/v1/feedin/current").text == "0.000000"
+    assert client.get("/v1/status-code").text == "10"
+    response = client.get("/v1/feedin/current-and-status")
+    assert response.status_code == 200
+    assert response.text == "10;0.000000"
+
+
 def test_index_exposes_flat_absolute_loxone_template_fields():
     now = datetime.fromisoformat("2026-07-04T08:05:00+02:00")
     set_state(ok_state(now), now)
@@ -170,6 +211,37 @@ def test_index_exposes_flat_absolute_loxone_template_fields():
     assert "feedin_relative_00" not in payload
     assert payload["loxone_integer_scale"] == "milli-CHF/kWh; divide by 1000 for CHF/kWh display"
     assert "Absolut" in payload["template_hint"]
+
+
+def test_index_reports_one_zero_filled_missing_hour_as_degraded_but_usable():
+    now = datetime.fromisoformat("2026-07-04T08:05:00+02:00")
+    today = now.astimezone(TZ).date().isoformat()
+    state = TariffState(
+        status="ok",
+        normalized={"status": "ok", "unit": "CHF/kWh", "days": {today: day_with_zero_filled_hour(today, 14)}},
+        updated_at=now.isoformat(),
+        upstream_last_success_at=now.isoformat(),
+        last_error=None,
+        last_http_status=200,
+    )
+    set_state(state, now)
+
+    response = client.get("/")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["status"] == "single_missing_hour_zero_filled"
+    assert payload["status_code"] == 10
+    assert "quality_status_code" not in payload
+    assert payload["data_quality_status"] == "single_missing_hour_zero_filled"
+    assert payload["missing_hour"] == 14
+    assert payload["missing_hours"] == [14]
+    assert payload["missing_hour_count"] == 1
+    assert payload["zero_filled_hours"] == [14]
+    assert payload["feedin_h14"] == 0.0
+    assert payload["feedin_h14_mchf_kwh"] == 0
+    assert all(payload[f"feedin_h{hour:02d}"] is not None for hour in range(24))
+    assert all(payload[f"feedin_h{hour:02d}_mchf_kwh"] is not None for hour in range(24))
 
 
 def test_index_keeps_status_but_nulls_tariff_values_when_not_ok():
