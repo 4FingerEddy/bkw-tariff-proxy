@@ -80,7 +80,7 @@ Important fixes from the Fable5 architecture review:
 
 - `BKW +20` must not read hour 10. Use `feedin_h20_mchf_kwh`.
 - `BKW Aktuell chf/kWh` must read `feedin_current_mchf_kwh`, not the decimal `feedin_current` field when Loxone scaling is 1000 -> 1.
-- Missing tariff fields remain `null` when `status_code != 0`; do not convert them to `0`.
+- Missing tariff fields remain `null` for every status except `0` and `10`. Code `10` is the only explicit zero-fill case and identifies exactly one affected hour via `missing_hour`.
 
 ## Required status input
 
@@ -99,17 +99,19 @@ Mapping:
 3 = api_error
 4 = partial_horizon
 5 = unit_unknown
+10 = single_missing_hour_zero_filled
 99 = unknown internal state
 ```
 
 Rule of thumb:
 
 ```text
-status-code == 0 -> tariff optimization may run
-status-code != 0 -> block aggressive EMS/battery optimization and use normal fallback behavior
+status-code == 0  -> tariff optimization may run with complete values
+status-code == 10 -> tariff optimization may run with exactly one explicit zero-filled hour and a visible warning
+all other codes   -> block aggressive EMS/battery optimization and use normal fallback behavior
 ```
 
-Do not treat missing data as `0`. `0` is a legitimate feed-in price and therefore cannot represent missing data. Das funktioniert sonst vielleicht, aber schön ist anders.
+Do not silently treat missing data as `0`. `0` is a legitimate feed-in price; only status code `10` may explicitly zero-fill exactly one validated incomplete local hour.
 
 ## Poll interval recommendation
 
@@ -125,7 +127,10 @@ For simpler Loxone parsing, current value and status are also available as one s
 
 ```text
 /v1/feedin/current-and-status -> 0;0.081000
+/v1/feedin/current-and-status -> 10;0.000000  # explicit zero-fill hour
 ```
 
 First field: status code.
 Second field: current feed-in value in CHF/kWh.
+
+The bare `/v1/feedin/current` and `/v1/feedin/relative/{offset}` endpoints do not carry a degradation flag. Under status code `10`, the affected hour therefore returns the fabricated `0.000000` with HTTP 200. Never consume those endpoints without `/v1/status-code`; prefer this combined endpoint or `/v1/loxone.json` for EMS wiring.

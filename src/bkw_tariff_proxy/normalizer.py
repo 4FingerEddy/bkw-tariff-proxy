@@ -98,6 +98,7 @@ def _empty_hour(hour: int) -> dict[str, Any]:
         "value_mchf_kwh": None,
         "interval_count": 0,
         "dst_placeholder": False,
+        "zero_filled": False,
     }
 
 
@@ -160,17 +161,25 @@ def normalize_bkw_payload(
     day_end_local = day_start_local + timedelta(days=1)
     expected_intervals = expected_quarter_hours_for_day(day_start_local, tz)
 
+    seen_starts: set[datetime] = set()
+    duplicate_hours: set[int] = set()
+    duplicate_interval_count = 0
+    for row in interval_rows:
+        if row["start"] in seen_starts:
+            duplicate_hours.add(row["hour"])
+            duplicate_interval_count += 1
+        else:
+            seen_starts.add(row["start"])
+
     hourly_parts: dict[int, list[dict[str, Any]]] = {hour: [] for hour in range(24)}
     for row in interval_rows:
         hourly_parts[row["hour"]].append(row)
 
     hours: list[dict[str, Any]] = []
-    complete = True
     for hour in range(24):
         parts = sorted(hourly_parts[hour], key=lambda item: item["start"])
         if not parts:
             hours.append(_empty_hour(hour))
-            complete = False
             continue
         value = round(sum(part["value"] for part in parts) / len(parts), 6)
         interval_count = len(parts)
@@ -181,10 +190,10 @@ def normalize_bkw_payload(
                 "value_mchf_kwh": value_to_mchf_kwh(value),
                 "interval_count": interval_count,
                 "dst_placeholder": False,
+                "zero_filled": False,
             }
         )
-        if interval_count < 4:
-            complete = False
+
 
     # Spring-forward day: local 02:00 does not exist. Keep the JSON contract at
     # 24 slots by copying h03 as a flagged placeholder; that hour is never the
@@ -197,20 +206,49 @@ def normalize_bkw_payload(
             "value_mchf_kwh": source["value_mchf_kwh"],
             "interval_count": 0,
             "dst_placeholder": True,
+            "zero_filled": False,
         }
 
     # Fall-back day: 02:00 occurs twice, therefore 8 quarter-hours are expected
     # for that display hour. Normal days need 4 real intervals per hour.
+    missing_hours: list[int] = []
+    interval_deficits: dict[int, int] = {}
     for hour in range(24):
         if hours[hour]["dst_placeholder"]:
             continue
         expected_for_hour = 8 if expected_intervals == 100 and hour == 2 else 4
-        if hours[hour]["interval_count"] != expected_for_hour:
-            complete = False
+        actual_intervals = hours[hour]["interval_count"]
+        if actual_intervals != expected_for_hour or hour in duplicate_hours:
+            missing_hours.append(hour)
+            if actual_intervals < expected_for_hour:
+                interval_deficits[hour] = expected_for_hour - actual_intervals
 
     received_intervals = len(interval_rows)
-    if received_intervals != expected_intervals:
-        complete = False
+    complete = not missing_hours and received_intervals == expected_intervals
+    zero_filled_hours: list[int] = []
+    if len(missing_hours) == 1:
+        hour = missing_hours[0]
+        deficit = interval_deficits.get(hour)
+        if hour not in duplicate_hours and deficit is not None and received_intervals == expected_intervals - deficit:
+            hours[hour] = {
+                "hour": hour,
+                "value_chf_kwh": 0.0,
+                "value_mchf_kwh": 0,
+                "interval_count": 0,
+                "dst_placeholder": False,
+                "zero_filled": True,
+            }
+            zero_filled_hours = [hour]
+            complete = True
+
+    if expected_intervals == 92 and hours[2]["dst_placeholder"]:
+        source = hours[3]
+        hours[2]["value_chf_kwh"] = source["value_chf_kwh"]
+        hours[2]["value_mchf_kwh"] = source["value_mchf_kwh"]
+
+    data_quality_status = "single_missing_hour_zero_filled" if zero_filled_hours else ("ok" if complete else "partial_horizon")
+    status_code = 10 if zero_filled_hours else (0 if complete else 4)
+    missing_hour = missing_hours[0] if len(missing_hours) == 1 else None
 
     day_payload = {
         "tariff_date": tariff_date,
@@ -220,13 +258,24 @@ def normalize_bkw_payload(
         "coverage_end_utc": last_end.astimezone(ZoneInfo("UTC")).isoformat(),
         "expected_intervals": expected_intervals,
         "received_intervals": received_intervals,
+        "missing_hours": missing_hours,
+        "missing_hour": missing_hour,
+        "missing_hour_count": len(missing_hours),
+        "zero_filled_hours": zero_filled_hours,
+        "duplicate_hours": sorted(duplicate_hours),
+        "duplicate_interval_count": duplicate_interval_count,
+        "data_quality_status": data_quality_status,
+        "status_code": status_code,
         "content_hash": hashlib.sha256(json.dumps(prices, sort_keys=True).encode("utf-8")).hexdigest(),
         "publication_timestamp": publication_timestamp,
     }
 
     relative = build_relative_from_days({tariff_date: day_payload}, now=now, timezone_name=timezone_name, horizon_hours=horizon_hours)
     return {
-        "status": "ok" if complete else "partial_horizon",
+        "status": data_quality_status if zero_filled_hours else ("ok" if complete else "partial_horizon"),
+        "status_code": status_code,
+        "data_quality_status": data_quality_status,
+        "missing_hour": missing_hour,
         "unit": "CHF/kWh",
         "publication_timestamp": publication_timestamp,
         "day": day_payload,

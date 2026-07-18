@@ -131,13 +131,15 @@ factor for CHF/kWh display = 0.001
 - `3`: API error — upstream request or processing failed and no valid today dataset is available.
 - `4`: Partial horizon — today's dataset exists, but expected intervals/hours are incomplete.
 - `5`: Unknown unit — upstream unit is not safely understood.
+- `10`: Single missing hour zero-filled — exactly one incomplete local hour was explicitly replaced with `0`; all other hours passed validation and tariff fields remain populated.
 - `99`: Unknown internal state.
 
 Recommended Loxone guard:
 
 ```text
-status_code == 0 -> optimizer may use values; tariff fields are populated
-status_code != 0 -> block/neutralize optimization; flat Loxone tariff fields are intentionally null
+status_code == 0  -> optimizer may use the complete validated values
+status_code == 10 -> optimizer may use the values; show a data-quality warning for missing_hour
+all other codes  -> block/neutralize optimization; flat Loxone tariff fields are null
 ```
 
 ## Loxone target model
@@ -192,10 +194,11 @@ Synthetic values are deliberately fake and must not be used for production energ
 ## Safety notes
 
 - Do not expose this service directly to the internet.
-- Do not treat missing tariff values as zero.
+- Do not silently treat missing tariff values as zero. Only the explicit single-hour policy may zero-fill exactly one incomplete local hour and must report status code `10` plus `missing_hour`; the resulting `0.0` is fabricated, not a measured tariff.
+- Do not consume the plain current/relative value endpoints without the status guard. Use `/v1/feedin/current-and-status` or `/v1/loxone.json` when status and value must stay coupled.
 - Do not guess unknown units; fail visibly instead.
 - Keep `/data` persistent.
-- Configure Loxone to block optimization unless `status_code == 0`.
+- Configure Loxone to allow optimization only for status codes `0` and `10`; all other codes must block or neutralize it.
 
 ## License
 
