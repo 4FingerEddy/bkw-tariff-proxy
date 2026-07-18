@@ -44,13 +44,16 @@ h23         -> \i"feedin_h23_mchf_kwh":\i\v
 
 All tariff inputs are signed analogue values. Negative feed-in tariffs are possible.
 
-The integer scale is milli-CHF/kWh:
+The JSON transport scale is integer milli-CHF/kWh. Correct every productive hour input in Loxone before connecting it to the optimizer:
 
 ```text
-45 = 0.045 CHF/kWh
+JSON transport value:       45 mCHF/kWh
+Virtual Input correction:   0..1000 -> 0..1
+Spot Price Optimizer value: 0.045 CHF/kWh
+Display unit:               <v.3>CHF
 ```
 
-Use correction factor `0.001` only for display in CHF/kWh. The optimizer may compare the integer values directly because all 24 values share the same scale.
+Enable signed interpretation on every hour input because negative tariffs are valid. Do not feed the raw integer transport values directly into the Spot Price Optimizer.
 
 ## Status guard
 
