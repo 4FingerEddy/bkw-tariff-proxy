@@ -1,14 +1,14 @@
-# Production stack template for the BKW tariff HTTP proxy.
+# Generic Portainer/Compose stack for the BKW tariff HTTP proxy.
 #
-# Before production use:
-# 1. pin the desired image tag,
-# 2. keep BKW_TEST_DATA_MODE off/absent,
-# 3. bind the port only to the intended LAN interface if your host has multiple networks,
-# 4. verify /health, /v1/status-code and /v1/loxone.json before connecting Loxone automation.
+# Before deployment:
+# 1. verify that the selected image tag exists and is the intended release,
+# 2. keep BKW_TEST_DATA_MODE off for production,
+# 3. expose port 8785 only on a trusted LAN interface/firewall zone,
+# 4. verify /health, /v1/status-code and /v1/loxone.json before connecting automation.
 
 services:
   bkw-tariff-proxy:
-    image: ghcr.io/4fingereddy/bkw-tariff-proxy:0.1.0
+    image: ghcr.io/4fingereddy/bkw-tariff-proxy:0.2.0
     container_name: bkw-tariff-proxy
     restart: unless-stopped
     ports:
@@ -18,8 +18,8 @@ services:
       DATA_DIR: /data
       BKW_ENDPOINT: https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn
       POLL_INTERVAL_SECONDS: "900"
-      CACHE_MAX_AGE_SECONDS: "5400"
-      REQUIRE_FULL_HORIZON: "true"
+      UPSTREAM_WARN_AGE_SECONDS: "7200"
+      REQUIRE_COMPLETE_DAY: "true"
       BKW_TEST_DATA_MODE: "off"
     volumes:
       - bkw-tariff-proxy-data:/data

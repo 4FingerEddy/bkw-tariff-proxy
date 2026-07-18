@@ -1,17 +1,18 @@
 services:
   bkw-tariff-proxy:
-    image: ghcr.io/4fingereddy/bkw-tariff-proxy:0.1.0
+    image: ghcr.io/4fingereddy/bkw-tariff-proxy:0.2.0
     container_name: bkw-tariff-proxy
     restart: unless-stopped
     ports:
+      # Keep this port on the trusted LAN. Do not publish or forward it to the internet.
       - "8785:8785"
     environment:
       TZ: Europe/Zurich
       DATA_DIR: /data
       BKW_ENDPOINT: https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn
       POLL_INTERVAL_SECONDS: "900"
-      CACHE_MAX_AGE_SECONDS: "5400"
-      REQUIRE_FULL_HORIZON: "true"
+      UPSTREAM_WARN_AGE_SECONDS: "7200"
+      REQUIRE_COMPLETE_DAY: "true"
       BKW_TEST_DATA_MODE: "off"
     volumes:
       - bkw-tariff-proxy-data:/data

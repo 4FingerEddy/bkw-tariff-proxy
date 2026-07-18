@@ -1,13 +1,13 @@
 # BKW API observations
 
-Observed from Rootkeeper.
+This document records public API behavior relevant to the proxy. It is not a live service-status page.
 
 ## Swagger
 
 ```text
 URL: https://api.bkw.ch/api/dyntariffs/swagger/v1/swagger.json
-HTTP: 200
-Content-Type: application/json;charset=utf-8
+HTTP observed: 200
+Content-Type observed: application/json;charset=utf-8
 Title: BKW Dynamic Tariffs API
 Version: v1
 Paths:
@@ -17,12 +17,12 @@ Paths:
 
 ## Schema summary
 
-`TariffDto`:
+`TariffDto` contains:
 
 - `publication_timestamp`
 - `prices[]`
 
-Each `PriceDto` contains interval timestamps and component arrays such as:
+Each price entry contains interval timestamps and component arrays such as:
 
 - `electricity`
 - `feed_in`
@@ -30,29 +30,15 @@ Each `PriceDto` contains interval timestamps and component arrays such as:
 - `integrated`
 - `regional_fees`
 
-Each price component has:
-
-- `unit`
-- `value`
-
-For this product, use `feed_in[0].value` and normalize the declared `unit` to `CHF/kWh`.
+Each price component has a declared `unit` and `value`. This project reads the feed-in component and accepts only a known CHF/kWh unit mapping.
 
 ## Historical endpoint status — 2026-06-20
 
-Observed endpoints returned naked 404 with zero-byte body:
+The tariff endpoints initially returned HTTP 404 with an empty body. The proxy treated that as unavailable data and kept its local status endpoints available so Loxone could fail closed.
 
-```text
-https://api.bkw.ch/api/dyntariffs/v1/Tariffs/energyreturn -> 404 bytes=0
-https://api.bkw.ch/api/dyntariffs/v1/Tariffs -> 404 bytes=0
-https://api.bkw.ch/api/dyntariffs/v1/tariffs/energyreturn -> 404 bytes=0
-https://api.bkw.ch/api/dyntariffs/v1/tariffs/ -> 404 bytes=0
-```
+## Live endpoint observation — 2026-07-02
 
-Interpretation at the time: treat 404 as `no_data`, not as application crash. Keep serving local status endpoints so Loxone can block optimization cleanly until BKW data appears.
-
-## Live endpoint status — 2026-07-02
-
-`GET /api/dyntariffs/v1/Tariffs/energyreturn` is live:
+The energy-return endpoint returned:
 
 ```text
 HTTP: 200
@@ -64,10 +50,15 @@ first_start_local: 2026-07-03T00:00:00+02:00
 last_end_local: 2026-07-04T00:00:00+02:00
 ```
 
-Operational interpretation:
+## Current data model
 
-- BKW publishes next-day feed-in data, currently 96 quarter-hour intervals.
-- The HTTP proxy groups quarter-hour values into hourly Loxone relative slots using the arithmetic mean of all four quarter-hour values inside each complete hour.
-- Before midnight, `+0` may be unavailable because the feed begins at next local midnight. The proxy reports `partial_horizon` / status-code `4` instead of inventing fallback values. It also reports `partial_horizon` if a live BKW hour is missing one or more quarter-hour intervals.
-- From midnight, if a full 24-hour rolling horizon is available, status should become `ok` / status-code `0`.
-- Keep 404/no_data handling for resilience; do not remove it just because the API is currently live.
+- The proxy is based on a Swiss local tariff day, not a rolling production horizon.
+- Quarter-hour feed-in values are grouped into absolute local hours using the arithmetic mean.
+- `/v1/loxone.json` exposes absolute `h00` through `h23` fields for the Spot Price Optimizer in Absolute mode.
+- A valid today vector remains usable until local midnight; upstream age remains diagnostic.
+- Exactly one incomplete/missing local hour may be explicitly zero-filled and reported as status code `10`.
+- More than one incomplete/missing hour fails closed as status code `4`.
+- Duplicate interval starts and inconsistent cached metadata fail closed.
+- The proxy keeps unavailable-data and unknown-unit handling even when the upstream endpoint is currently healthy.
+
+The upstream API may change. Consumers must use the proxy status code rather than assuming every HTTP 200 payload is suitable for automation.
