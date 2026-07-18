@@ -41,7 +41,8 @@ Create exactly **25 command recognitions**:
 - [ ] Connect `h00 ... h23` to `00:00 ... 23:00` in Spot Price Optimizer **Absolute mode**.
 - [ ] Add a guard that opens only for status `0` or `10`.
 - [ ] Add a visible degraded-data warning for status `10`.
-- [ ] Apply factor `0.001` only to a display value.
+- [ ] Keep correction `0..1000 -> 0..1` on every signed hour input before the optimizer.
+- [ ] Confirm that transport value `45` reaches the optimizer as `0.045 CHF/kWh`.
 - [ ] Document synthetic-mode testing and the required return to live mode.
 - [ ] Remove all private objects, identifiers and unrelated programming.
 

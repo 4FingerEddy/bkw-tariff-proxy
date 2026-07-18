@@ -71,8 +71,8 @@ The template contains one status input and 24 absolute hourly inputs.
 
 - Select **Absolute mode**.
 - Connect `h00` to `00:00`, through `h23` to `23:00`.
-- Keep the raw integer scale for optimizer ordering.
-- Apply factor `0.001` only for CHF/kWh display.
+- Keep the template correction `0..1000 -> 0..1` on every signed hour input.
+- Confirm that transport value `45` reaches the optimizer as `0.045 CHF/kWh`.
 - Permit productive optimization only when status is `0` or `10`.
 - Show a degraded-data warning for status `10`.
 - Block or neutralize every other status.

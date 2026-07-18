@@ -20,7 +20,7 @@ This community template integrates BKW's dynamic Swiss feed-in tariff into Loxon
 BKW API -> self-hosted Docker proxy -> Loxone Virtual HTTP Input -> Spot Price Optimizer
 ```
 
-Use the Spot Price Optimizer in **Absolute mode**. The template supplies the hours `00:00` through `23:00` as signed integer milli-CHF/kWh values. Example: `45` means `0.045 CHF/kWh`. Apply factor `0.001` only when displaying CHF/kWh.
+Use the Spot Price Optimizer in **Absolute mode**. The proxy transports the hours `00:00` through `23:00` as signed integer milli-CHF/kWh values. The template corrects every hour input with `0..1000 -> 0..1` before the optimizer, so transport value `45` becomes `0.045 CHF/kWh`. Negative tariffs remain valid.
 
 The numeric status input is the automation safety boundary:
 

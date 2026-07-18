@@ -128,15 +128,19 @@ h01         -> \i"feedin_h01_mchf_kwh":\i\v
 h23         -> \i"feedin_h23_mchf_kwh":\i\v
 ```
 
-Scale:
+Transport and Loxone correction:
 
 ```text
-45 = 0.045 CHF/kWh
+JSON transport value:       45 mCHF/kWh
+Virtual Input correction:   0..1000 -> 0..1
+Spot Price Optimizer value: 0.045 CHF/kWh
 ```
 
-Apply factor `0.001` only for display in CHF/kWh. The optimizer may compare all 24 integer values directly.
+Do not feed raw integer mCHF/kWh values into the Spot Price Optimizer. The exported template applies the correction on every hour input and displays `<v.3>CHF`.
 
 Detailed mapping: [`docs/loxone-endpoints.md`](docs/loxone-endpoints.md).
+
+Reviewed Loxone artifacts: [`data/loxone/`](data/loxone/).
 
 Publication preparation and export checks: [`docs/library/`](docs/library/).
 
